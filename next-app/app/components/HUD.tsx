@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 interface HUDProps {
   mode: "live" | "replay";
   elapsed: number; // seconds
@@ -32,9 +34,16 @@ export default function HUD({
         <span className="text-surface/90 tabular-nums">{formatTime(elapsed)}</span>
       </div>
 
-      {/* Center: Title (hidden on mobile) */}
-      <div className="hidden md:block text-surface font-medium">
-        {title}
+      {/* Center: Logo + Title (hidden on mobile) */}
+      <div className="hidden md:flex items-center gap-2 text-surface font-medium">
+        <Image
+          src="/logo.png"
+          alt="BeeHonest"
+          width={24}
+          height={24}
+          className="w-6 h-6"
+        />
+        <span>{title || "BeeHonest"}</span>
       </div>
 
       {/* Right: Control buttons */}

@@ -5,13 +5,14 @@ import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
 import type { Segment, Claim, SpeakerMap } from "../types";
 
-export default function LivePage() {
+export default function ReplayPage() {
   const [elapsed, setElapsed] = useState(0);
   const [showTranscript, setShowTranscript] = useState(false);
   const [showFactFeed, setShowFactFeed] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
-  // Session state (will be populated as transcription happens)
-  const [sessionId] = useState(`live_${Date.now()}`);
+  // Session state (will be populated from replay data)
+  const [sessionId] = useState(`replay_${Date.now()}`);
   const [segments] = useState<Segment[]>([]);
   const [claims] = useState<Claim[]>([]);
   const [speakers] = useState<SpeakerMap>({
@@ -19,15 +20,10 @@ export default function LivePage() {
     spk_1: "Speaker B"
   });
 
-  // Timer for elapsed time
-  useEffect(() => {
-    const startTime = Date.now();
-    const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
+  // Handle video time updates
+  const handleTimeUpdate = (time: number) => {
+    setElapsed(Math.floor(time));
+  };
 
   const handleToggleTranscript = () => {
     setShowTranscript(!showTranscript);
@@ -39,21 +35,43 @@ export default function LivePage() {
 
   return (
     <div className="relative w-screen h-screen bg-foreground overflow-hidden">
-      {/* Video layer - full screen webcam */}
-      <VideoLayer mode="live" />
+      {/* Video layer - replay video */}
+      <VideoLayer 
+        mode="replay" 
+        videoUrl={videoUrl || undefined}
+        onTimeUpdate={handleTimeUpdate}
+      />
 
       {/* HUD overlay */}
       <HUD
-        mode="live"
+        mode="replay"
         elapsed={elapsed}
         onToggleTranscript={handleToggleTranscript}
         onToggleFactFeed={handleToggleFactFeed}
       />
 
-      {/* Placeholder for future components */}
-      {/* PopupManager will go here */}
-      {/* TranscriptDrawer will go here */}
-      {/* FactFeedDrawer will go here */}
+      {/* Placeholder for video selection if no video loaded */}
+      {!videoUrl && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background">
+          <div className="text-center px-8 max-w-md">
+            <h2 className="text-2xl font-semibold text-foreground mb-4">
+              No Recording Selected
+            </h2>
+            <p className="text-foreground/60 mb-6">
+              Select a recorded debate to watch and analyze
+            </p>
+            <button
+              onClick={() => {
+                // TODO: Implement video file selection
+                alert("Video selection coming soon");
+              }}
+              className="px-6 py-3 rounded-lg bg-primary text-foreground font-semibold hover:opacity-90 transition-all shadow-md"
+            >
+              Select Recording
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Temporary indicators for drawer states (for testing) */}
       {showTranscript && (
@@ -68,7 +86,7 @@ export default function LivePage() {
             </button>
           </div>
           <div className="text-foreground/70 text-sm">
-            <p className="italic">Transcript will appear here as speech is detected...</p>
+            <p className="italic">Transcript will appear here...</p>
             <div className="mt-4 space-y-4">
               {segments.map(seg => (
                 <div key={seg.id} className="border-l-2 border-border pl-3">
@@ -120,3 +138,4 @@ export default function LivePage() {
     </div>
   );
 }
+
