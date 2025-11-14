@@ -1,19 +1,3 @@
-Yes, totally fair — the last answer was more of a delta than a full spec. Let’s fix that.
-
-Below is a **single, self‑contained spec** that includes:
-
-* Full **UX & UI description** (full‑screen, overlay‑style)
-* **Data models**
-* **Backend architecture & endpoints**
-* **Claude usage** (for fallacies & claims)
-* **Fact‑check API integration** (instead of Claude doing fact checking)
-* **Frontend component breakdown**
-* A **roadmap** with core vs optional bits
-
-You can paste this straight into Cursor / Claude Code as your “build this” document.
-
----
-
 # DebateRef – Full Architecture & Roadmap (with Fact‑Check API)
 
 ## 1. Product Vision
