@@ -64,10 +64,10 @@ export default function VideoLayer({ mode, videoUrl, onTimeUpdate }: VideoLayerP
 
   if (error) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
+      <div className="absolute inset-0 flex items-center justify-center bg-background">
         <div className="text-center px-8">
-          <p className="text-red-500 text-lg mb-4">{error}</p>
-          <p className="text-slate-400 text-sm">
+          <p className="text-primary text-lg mb-4">{error}</p>
+          <p className="text-foreground/60 text-sm">
             Please check your browser settings and refresh the page.
           </p>
         </div>

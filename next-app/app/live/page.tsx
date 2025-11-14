@@ -47,14 +47,14 @@ export default function LivePage() {
   if (!isStarted) {
     // Initial screen with "Start Live Debate" button
     return (
-      <div className="relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center">
+      <div className="relative w-screen h-screen bg-background overflow-hidden flex items-center justify-center">
         <button
           onClick={handleStart}
-          className="px-8 py-4 text-xl font-semibold text-white bg-red-600 hover:bg-red-700 rounded-full transition-colors shadow-lg"
+          className="px-8 py-4 text-xl font-semibold text-foreground bg-primary hover:opacity-90 rounded-full transition-all shadow-lg"
         >
           Start Live Debate
         </button>
-        <div className="absolute bottom-8 text-center text-slate-400 text-sm">
+        <div className="absolute bottom-8 text-center text-foreground/50 text-sm">
           <p>Camera and microphone access will be requested</p>
         </div>
       </div>
@@ -62,7 +62,7 @@ export default function LivePage() {
   }
 
   return (
-    <div className="relative w-screen h-screen bg-black overflow-hidden">
+    <div className="relative w-screen h-screen bg-foreground overflow-hidden">
       {/* Video layer - full screen webcam */}
       <VideoLayer mode="live" />
 
@@ -81,22 +81,22 @@ export default function LivePage() {
 
       {/* Temporary indicators for drawer states (for testing) */}
       {showTranscript && (
-        <div className="fixed left-0 top-0 h-full w-full md:w-[360px] bg-slate-900/95 backdrop-blur-sm z-20 p-6">
+        <div className="fixed left-0 top-0 h-full w-full md:w-[360px] bg-surface/95 backdrop-blur-sm z-20 p-6 border-r border-border shadow-lg">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-white text-lg font-semibold">Transcript</h2>
+            <h2 className="text-foreground text-lg font-semibold">Transcript</h2>
             <button
               onClick={() => setShowTranscript(false)}
-              className="text-slate-400 hover:text-white"
+              className="text-foreground/50 hover:text-foreground transition-colors"
             >
               ✕
             </button>
           </div>
-          <div className="text-slate-300 text-sm">
+          <div className="text-foreground/70 text-sm">
             <p className="italic">Transcript will appear here as speech is detected...</p>
             <div className="mt-4 space-y-4">
               {segments.map(seg => (
-                <div key={seg.id} className="border-l-2 border-slate-700 pl-3">
-                  <div className="text-xs text-slate-500 mb-1">
+                <div key={seg.id} className="border-l-2 border-border pl-3">
+                  <div className="text-xs text-foreground/50 mb-1">
                     [{speakers[seg.speaker]}] {Math.floor(seg.start)}s
                   </div>
                   <div>{seg.text}</div>
@@ -108,31 +108,31 @@ export default function LivePage() {
       )}
 
       {showFactFeed && (
-        <div className="fixed right-0 top-0 h-full w-full md:w-[360px] bg-slate-900/95 backdrop-blur-sm z-20 p-6">
+        <div className="fixed right-0 top-0 h-full w-full md:w-[360px] bg-surface/95 backdrop-blur-sm z-20 p-6 border-l border-border shadow-lg">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-white text-lg font-semibold">Fact Feed</h2>
+            <h2 className="text-foreground text-lg font-semibold">Fact Feed</h2>
             <button
               onClick={() => setShowFactFeed(false)}
-              className="text-slate-400 hover:text-white"
+              className="text-foreground/50 hover:text-foreground transition-colors"
             >
               ✕
             </button>
           </div>
-          <div className="text-slate-300 text-sm">
+          <div className="text-foreground/70 text-sm">
             <p className="italic">Claims and fact-checks will appear here...</p>
             <div className="mt-4 space-y-4">
               {claims.map(claim => (
-                <div key={claim.id} className="border border-slate-700 rounded-lg p-3">
+                <div key={claim.id} className="border border-border rounded-lg p-3 bg-background-secondary">
                   <div className="flex gap-2 mb-2">
-                    <span className="text-xs px-2 py-1 bg-red-500/20 text-red-300 rounded">
+                    <span className="text-xs px-2 py-1 bg-primary/20 text-foreground rounded">
                       {claim.fallacy.toUpperCase()}
                     </span>
-                    <span className="text-xs px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded">
+                    <span className="text-xs px-2 py-1 bg-primary/10 text-foreground rounded">
                       {claim.verdict.toUpperCase()}
                     </span>
                   </div>
                   <div className="text-sm">{claim.text}</div>
-                  <div className="text-xs text-slate-500 mt-2">
+                  <div className="text-xs text-foreground/50 mt-2">
                     {speakers[claim.speaker]} · {Math.floor(claim.start)}s
                   </div>
                 </div>
