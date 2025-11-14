@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
+import { useDeepgramTranscription } from "../hooks/useDeepgramTranscription";
 import type { Segment, Claim, SpeakerMap } from "../types";
 
 export default function LivePage() {
@@ -12,11 +13,19 @@ export default function LivePage() {
 
   // Session state (will be populated as transcription happens)
   const [sessionId] = useState(`live_${Date.now()}`);
-  const [segments] = useState<Segment[]>([]);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [claims] = useState<Claim[]>([]);
   const [speakers] = useState<SpeakerMap>({
-    spk_0: "Speaker A",
-    spk_1: "Speaker B"
+    spk_0: "Speaker 1",
+    spk_1: "Speaker 2",
+    spk_2: "Speaker 3"
+  });
+
+  // Use Deepgram for real-time transcription
+  const { segments, isConnected, error: transcriptionError } = useDeepgramTranscription({
+    stream: mediaStream,
+    sessionId,
+    enabled: isStarted
   });
 
   // Timer for elapsed time
@@ -29,6 +38,10 @@ export default function LivePage() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleStreamReady = (stream: MediaStream) => {
+    setMediaStream(stream);
+  };
+
   const handleToggleTranscript = () => {
     setShowTranscript(!showTranscript);
   };
@@ -40,7 +53,7 @@ export default function LivePage() {
   return (
     <div className="relative w-screen h-screen bg-foreground overflow-hidden">
       {/* Video layer - full screen webcam */}
-      <VideoLayer mode="live" />
+      <VideoLayer mode="live" onStreamReady={handleStreamReady} />
 
       {/* HUD overlay */}
       <HUD
@@ -49,6 +62,21 @@ export default function LivePage() {
         onToggleTranscript={handleToggleTranscript}
         onToggleFactFeed={handleToggleFactFeed}
       />
+
+      {/* Transcription status indicator */}
+      <div className="absolute top-20 left-4 z-10 pointer-events-none">
+        {isConnected && (
+          <div className="flex items-center gap-2 bg-green-500/20 border border-green-500/50 rounded-full px-3 py-1">
+            <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-xs text-green-300 font-medium">Transcribing</span>
+          </div>
+        )}
+        {transcriptionError && (
+          <div className="bg-red-500/20 border border-red-500/50 rounded-lg px-3 py-2 max-w-xs">
+            <span className="text-xs text-red-300">{transcriptionError}</span>
+          </div>
+        )}
+      </div>
 
       {/* Placeholder for future components */}
       {/* PopupManager will go here */}
