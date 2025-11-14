@@ -1,0 +1,68 @@
+### OS / Editor junk
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+.vscode/
+.idea/
+
+### Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+.python-version
+.node-version
+.claude/
+
+### Node / Next.js artifacts
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.yarn/
+.npm/
+.pnpm-store/
+.turbo/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+### Python / FastAPI artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+.venv/
+venv/
+env/
+env.bak/
+.tox/
+.ruff_cache/
+pip-wheel-metadata/
+*.egg-info/
+*.egg
+
+### Testing / tooling outputs
+.nyc_output/
+coverage-final.json
+reports/
+.cypress/
+.playwright/
+*.log
+tmp/
+
+### Local data
+data/
+*.sqlite
+*.sqlite3
+*.db
