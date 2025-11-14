@@ -1,148 +1,145 @@
-DebateRef – Full Architecture & Roadmap (with Fact‑Check API)
-1. Product Vision
+Yes, totally fair — the last answer was more of a delta than a full spec. Let’s fix that.
 
-DebateRef is a web app that sits “on top of” a debate like a broadcast graphics package:
+Below is a **single, self‑contained spec** that includes:
 
-The video (live or recorded) is full‑screen.
+* Full **UX & UI description** (full‑screen, overlay‑style)
+* **Data models**
+* **Backend architecture & endpoints**
+* **Claude usage** (for fallacies & claims)
+* **Fact‑check API integration** (instead of Claude doing fact checking)
+* **Frontend component breakdown**
+* A **roadmap** with core vs optional bits
 
-When someone says something questionable, a popup overlay appears over the video for a few seconds:
+You can paste this straight into Cursor / Claude Code as your “build this” document.
 
-“Strawman”, “Appeal to Emotion”, “Likely false”, etc.
+---
 
-Viewers can optionally open side drawers:
+# DebateRef – Full Architecture & Roadmap (with Fact‑Check API)
 
-Left: full transcript.
+## 1. Product Vision
 
-Right: a Fact Feed with all claims, fallacies, and fact‑check results (with source links).
+**DebateRef** is a web app that sits “on top of” a debate like a broadcast graphics package:
+
+* The **video (live or recorded) is full‑screen**.
+* When someone says something questionable, a **popup overlay** appears over the video for a few seconds:
+
+  * “Strawman”, “Appeal to Emotion”, “Likely false”, etc.
+* Viewers can optionally open **side drawers**:
+
+  * Left: full **transcript**.
+  * Right: a **Fact Feed** with all claims, fallacies, and fact‑check results (with source links).
 
 No agents, no loops — just a clean pipeline:
 
-audio → STT → segments → Claude → claims/fallacies → fact‑check API → verdict + sources → overlays + drawers.
+> audio → STT → segments → Claude → claims/fallacies → fact‑check API → verdict + sources → overlays + drawers.
 
 We support two modes:
 
-Live Mode (/live): webcam + mic, near‑real‑time overlays.
+* **Live Mode** (`/live`): webcam + mic, near‑real‑time overlays.
+* **Replay Mode** (`/replay`): preprocessed clip with synced overlays.
 
-Replay Mode (/replay): preprocessed clip with synced overlays.
+---
 
-2. User Experience
-2.1 Live Mode (/live)
+## 2. User Experience
 
-Flow:
-
-User opens /live.
-
-Sees a fullscreen dark screen with a big “Start Live Debate” button.
-
-Click → browser asks for camera + mic permissions.
-
-Once granted:
-
-Webcam feed fills the screen (object-fit: cover).
-
-A top HUD appears:
-
-LIVE ● indicator
-
-Elapsed time (e.g. 01:23)
-
-Debate title/topic
-
-Buttons: Transcript, Fact Feed
-
-As two people debate:
-
-Frontend (via STT SDK) receives short transcript segments with speaker labels & timestamps.
-
-Each segment is sent to the backend:
-
-Claude extracts claims & fallacies.
-
-Fact‑check API evaluates truthfulness of factual claims.
-
-When a “claim event” is ready:
-
-A popup overlay appears on top of the video for ~5–8s, then disappears.
-
-At any time:
-
-Clicking Transcript slides in a left drawer with the full transcript.
-
-Clicking Fact Feed slides in a right drawer with a scrollable list of all claims, fallacies, verdicts, and source links.
-
-2.2 Replay Mode (/replay)
+### 2.1 Live Mode (`/live`)
 
 Flow:
 
-User opens /replay.
+1. User opens `/live`.
+2. Sees a fullscreen dark screen with a big **“Start Live Debate”** button.
+3. Click → browser asks for camera + mic permissions.
+4. Once granted:
 
-Sees the same full‑screen design:
+   * Webcam feed fills the screen (`object-fit: cover`).
+   * A top HUD appears:
 
-Center: a <video> player with a preloaded debate clip.
+     * `LIVE ●` indicator
+     * Elapsed time (e.g. `01:23`)
+     * Debate title/topic
+     * Buttons: `Transcript`, `Fact Feed`
+5. As two people debate:
 
-Top HUD: REPLAY, time, topic, Transcript, Fact Feed.
+   * Frontend (via STT SDK) receives short transcript segments with speaker labels & timestamps.
+   * Each segment is sent to the backend:
 
-As the video plays:
+     * Claude extracts **claims & fallacies**.
+     * Fact‑check API evaluates **truthfulness** of factual claims.
+   * When a “claim event” is ready:
 
-Popups appear exactly at the times of precomputed claims.
+     * A **popup overlay** appears on top of the video for ~5–8s, then disappears.
+6. At any time:
 
-Transcript drawer shows the full text; current line is highlighted based on video time.
+   * Clicking **Transcript** slides in a left drawer with the full transcript.
+   * Clicking **Fact Feed** slides in a right drawer with a scrollable list of all claims, fallacies, verdicts, and source links.
 
-Fact Feed drawer shows all events; clicking an item can optionally seek the video.
+### 2.2 Replay Mode (`/replay`)
 
-This mode is a reliable fallback for demoing, even if live STT is shaky, and is great for testing.
+Flow:
 
-3. Architecture Overview
-3.1 High‑Level Flow
+1. User opens `/replay`.
+2. Sees the same full‑screen design:
+
+   * Center: a `<video>` player with a preloaded debate clip.
+   * Top HUD: `REPLAY`, time, topic, `Transcript`, `Fact Feed`.
+3. As the video plays:
+
+   * Popups appear exactly at the times of precomputed claims.
+   * Transcript drawer shows the full text; current line is highlighted based on video time.
+   * Fact Feed drawer shows all events; clicking an item can optionally seek the video.
+
+This mode is a **reliable fallback** for demoing, even if live STT is shaky, and is great for testing.
+
+---
+
+## 3. Architecture Overview
+
+### 3.1 High‑Level Flow
 
 For both Live and Replay:
 
-Audio ingestion
+1. **Audio ingestion**
 
-Live: browser gets mic audio + uses STT SDK to get transcript segments.
+   * Live: browser gets mic audio + uses STT SDK to get transcript segments.
+   * Replay: offline script takes a video file → audio → STT → segments.
 
-Replay: offline script takes a video file → audio → STT → segments.
+2. **Segment → Claims & Fallacies (Claude)**
 
-Segment → Claims & Fallacies (Claude)
+   * One Claude call per segment:
 
-One Claude call per segment:
+     * Extract distinct claims & accusations.
+     * Tag fallacies (strawman, ad hominem, etc).
+     * Mark whether each claim needs external fact checking.
 
-Extract distinct claims & accusations.
+3. **Claim → Fact‑Check API**
 
-Tag fallacies (strawman, ad hominem, etc).
+   * For each `Claim` needing fact‑check:
 
-Mark whether each claim needs external fact checking.
+     * Call an external fact‑checking API with the claim text.
+     * Receive verdict (supported/disputed/likely false/uncertain) + evidence (titles, URLs, snippets).
+   * Enrich `Claim` with `verdict`, `confidence`, `sources`, and optionally a short `reasoning`.
 
-Claim → Fact‑Check API
+4. **Frontend Rendering**
 
-For each Claim needing fact‑check:
+   * Maintain `segments[]` + `claims[]` in state.
+   * PopupManager:
 
-Call an external fact‑checking API with the claim text.
+     * For Replay: triggers popups when `currentTime >= claim.start`.
+     * For Live: triggers popups as new claims arrive.
+   * Drawers:
 
-Receive verdict (supported/disputed/likely false/uncertain) + evidence (titles, URLs, snippets).
-
-Enrich Claim with verdict, confidence, sources, and optionally a short reasoning.
-
-Frontend Rendering
-
-Maintain segments[] + claims[] in state.
-
-PopupManager:
-
-For Replay: triggers popups when currentTime >= claim.start.
-
-For Live: triggers popups as new claims arrive.
-
-Drawers:
-
-TranscriptDrawer shows segments[].
-
-FactFeedDrawer shows claims[] with details and sources.
+     * TranscriptDrawer shows `segments[]`.
+     * FactFeedDrawer shows `claims[]` with details and sources.
 
 No component calls tools; only the backend does STT, Claude, and the fact‑check API.
 
-4. Data Model
-4.1 Core Types (TypeScript)
+---
+
+## 4. Data Model
+
+### 4.1 Core Types (TypeScript)
+
+```ts
 type SpeakerId = string; // e.g. "spk_0", "spk_1"
 
 interface SpeakerMap {
@@ -206,11 +203,13 @@ interface ClipAnalysis {
   segments: Segment[];
   claims: Claim[];
 }
+```
 
-4.2 Backend Models (Python/Pydantic)
+### 4.2 Backend Models (Python/Pydantic)
 
 You can mirror the above as:
 
+```py
 class SegmentModel(BaseModel):
     id: str
     sessionId: str
@@ -245,33 +244,36 @@ class LiveSessionState(BaseModel):
     speakers: dict[str, str]
     segments: list[SegmentModel] = []
     claims: list[ClaimModel] = []
-
+```
 
 And an in‑memory store:
 
+```py
 SESSIONS: dict[str, LiveSessionState] = {}
+```
 
-5. External Services
-5.1 STT + Diarization
+---
 
-Any STT provider that can:
+## 5. External Services
 
-From live audio: emit segments { text, speaker, startSec, endSec }.
+### 5.1 STT + Diarization
 
-From audio file (for replay preprocessing): emit similar segments.
+* Any STT provider that can:
 
-Use their JS SDK on the frontend for live if possible, or call from backend.
+  * From live audio: emit segments `{ text, speaker, startSec, endSec }`.
+  * From audio file (for replay preprocessing): emit similar segments.
+* Use their JS SDK on the frontend for live if possible, or call from backend.
 
-5.2 Claude (Segment → Claims & Fallacies)
+### 5.2 Claude (Segment → Claims & Fallacies)
 
-For each Segment, call Claude once to get JSON with list of claims and associated fallacies + needs_fact_check.
+* For each `Segment`, call Claude once to get JSON with list of claims and associated fallacies + `needs_fact_check`.
 
-5.3 Fact‑Check API (Claim → Verdict + Sources)
+### 5.3 Fact‑Check API (Claim → Verdict + Sources)
 
-Given claim.text, call an external fact‑check API.
+* Given `claim.text`, call an external fact‑check API.
+* Expected response (you can adapt to match the actual API):
 
-Expected response (you can adapt to match the actual API):
-
+```json
 {
   "verdict": "supported | disputed | likely_false | uncertain",
   "confidence": 0.0-1.0,
@@ -284,29 +286,33 @@ Expected response (you can adapt to match the actual API):
   ],
   "reasoning": "Short explanation of why."
 }
+```
 
+Backend wraps this into `FactSourceModel` and populates `Claim.verdict`, `Claim.sources`, `Claim.reasoning`, etc.
 
-Backend wraps this into FactSourceModel and populates Claim.verdict, Claim.sources, Claim.reasoning, etc.
+---
 
-6. Backend Endpoints
+## 6. Backend Endpoints
 
-All endpoints are single‑shot and stateless per call (except for in‑memory session storage).
+All endpoints are **single‑shot** and stateless per call (except for in‑memory session storage).
 
-6.1 /api/live/start – Start a live session
+### 6.1 `/api/live/start` – Start a live session
 
-Method: POST
-Request body (optional):
+**Method:** `POST`
+**Request body (optional):**
 
+```json
 {
   "speakers": {
     "spk_0": "Speaker A",
     "spk_1": "Speaker B"
   }
 }
+```
 
+**Response:**
 
-Response:
-
+```json
 {
   "sessionId": "live_abc123",
   "speakers": {
@@ -314,19 +320,21 @@ Response:
     "spk_1": "Speaker B"
   }
 }
-
+```
 
 Implementation:
 
-Generate sessionId.
+* Generate `sessionId`.
+* Initialize `LiveSessionState` and store in `SESSIONS`.
 
-Initialize LiveSessionState and store in SESSIONS.
+---
 
-6.2 /api/analyze-segment – Segment → Claims (with fact check)
+### 6.2 `/api/analyze-segment` – Segment → Claims (with fact check)
 
-Method: POST
-Body:
+**Method:** `POST`
+**Body:**
 
+```json
 {
   "id": "seg_1",
   "sessionId": "live_abc123",
@@ -335,29 +343,27 @@ Body:
   "end": 15.8,
   "text": "I think Cuomo wants to abolish all policing."
 }
+```
 
+**Steps:**
 
-Steps:
+1. Ensure `LiveSessionState` exists for `sessionId`.
+2. Call Claude with segment prompt (see §7) → `claims[]` with `fallacy`, `needs_fact_check`.
+3. For each claim:
 
-Ensure LiveSessionState exists for sessionId.
+   * Build a `ClaimModel` with `verdict = "not_checked"` initially.
+   * If `needsFactCheck`, call fact‑check API and fill `verdict`, `confidence`, `reasoning`, `sources`.
+4. Append `SegmentModel` and `ClaimModel`s to `session`.
+5. Return list of `ClaimModel` as JSON.
 
-Call Claude with segment prompt (see §7) → claims[] with fallacy, needs_fact_check.
+---
 
-For each claim:
+### 6.3 `/api/live/state?sessionId=...` – (Optional) Fetch current live state
 
-Build a ClaimModel with verdict = "not_checked" initially.
+**Method:** `GET`
+**Response:** `LiveSessionState` JSON:
 
-If needsFactCheck, call fact‑check API and fill verdict, confidence, reasoning, sources.
-
-Append SegmentModel and ClaimModels to session.
-
-Return list of ClaimModel as JSON.
-
-6.3 /api/live/state?sessionId=... – (Optional) Fetch current live state
-
-Method: GET
-Response: LiveSessionState JSON:
-
+```json
 {
   "sessionId": "live_abc123",
   "startedAt": 1710000000,
@@ -365,46 +371,44 @@ Response: LiveSessionState JSON:
   "segments": [ ... ],
   "claims": [ ... ]
 }
-
+```
 
 Primarily used for:
 
-Drawer contents (transcript & fact feed).
+* Drawer contents (transcript & fact feed).
+* As a fallback for missed live updates.
 
-As a fallback for missed live updates.
+---
 
-6.4 Replay Preprocessing Script (Offline, not HTTP)
+### 6.4 Replay Preprocessing Script (Offline, not HTTP)
 
 Script steps:
 
-Read transcript (from STT or manually prepared).
+1. Read transcript (from STT or manually prepared).
+2. Build `Segment[]` (id, speaker, start, end, text).
+3. For each segment:
 
-Build Segment[] (id, speaker, start, end, text).
+   * Call `/api/analyze-segment` (or the underlying function) to get claims.
+4. Aggregate into `ClipAnalysis` object.
+5. Write JSON to `public/data/demo_clip.json`.
 
-For each segment:
+---
 
-Call /api/analyze-segment (or the underlying function) to get claims.
+## 7. Claude Prompt (Segment → Claims/Fallacies)
 
-Aggregate into ClipAnalysis object.
+**System message:**
 
-Write JSON to public/data/demo_clip.json.
+> You analyze short segments of political or policy debates.
+> For each segment, you:
+>
+> 1. Extract meaningful claims or accusations.
+> 2. Tag logical fallacies present in each claim.
+> 3. Mark whether the claim should be fact-checked.
+>    Respond ONLY with strict JSON.
 
-7. Claude Prompt (Segment → Claims/Fallacies)
+**User template:**
 
-System message:
-
-You analyze short segments of political or policy debates.
-For each segment, you:
-
-Extract meaningful claims or accusations.
-
-Tag logical fallacies present in each claim.
-
-Mark whether the claim should be fact-checked.
-Respond ONLY with strict JSON.
-
-User template:
-
+```text
 Analyze this debate segment.
 
 Metadata:
@@ -441,15 +445,19 @@ Return ONLY valid JSON:
     "tone": "optional short descriptor like 'calm', 'angry', 'sarcastic'"
   }
 }
+```
 
+Backend parses this and maps each item to a `ClaimModel` before fact checking.
 
-Backend parses this and maps each item to a ClaimModel before fact checking.
+---
 
-8. Frontend Architecture & Components
-8.1 Global Layout (Both Modes)
+## 8. Frontend Architecture & Components
 
-Top‑level DebateStage component:
+### 8.1 Global Layout (Both Modes)
 
+Top‑level `DebateStage` component:
+
+```tsx
 <div className="relative w-screen h-screen bg-black overflow-hidden">
   <VideoLayer ... />
   <HUD ... />
@@ -474,34 +482,35 @@ Top‑level DebateStage component:
     currentTime={currentTime}
   />
 </div>
+```
 
-8.2 VideoLayer
+### 8.2 VideoLayer
 
-Live:
+* Live:
 
-getUserMedia({ video: true, audio: true })
+  * `getUserMedia({ video: true, audio: true })`
+  * `videoRef.current.srcObject = stream`
+* Replay:
 
-videoRef.current.srcObject = stream
-
-Replay:
-
-<video src={analysis.videoUrl} controls onTimeUpdate={...} />
+  * `<video src={analysis.videoUrl} controls onTimeUpdate={...} />`
 
 Always styled as:
 
+```tsx
 <video
   className="absolute inset-0 w-full h-full object-cover"
   ...
 />
+```
 
-8.3 HUD
+### 8.3 HUD
 
 Top overlay:
 
-Left: LIVE ● or REPLAY, elapsed time.
+* Left: `LIVE ●` or `REPLAY`, elapsed time.
+* Right: buttons `Transcript`, `Fact Feed`.
 
-Right: buttons Transcript, Fact Feed.
-
+```tsx
 const HUD = ({ mode, elapsed, onToggleTranscript, onToggleFactFeed }) => (
   <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-between items-center px-4 md:px-8 py-4 text-xs md:text-sm text-slate-100">
     <div className="pointer-events-auto flex items-center gap-2">
@@ -524,11 +533,13 @@ const HUD = ({ mode, elapsed, onToggleTranscript, onToggleFactFeed }) => (
     </div>
   </div>
 );
+```
 
-8.4 PopupManager & Popup Components
+### 8.4 PopupManager & Popup Components
 
 State:
 
+```ts
 const [visiblePopups, setVisiblePopups] = useState<PopupInstance[]>([]);
 
 interface PopupInstance {
@@ -538,227 +549,194 @@ interface PopupInstance {
   createdAt: number;
   durationMs: number;
 }
-
+```
 
 Logic:
 
-In Replay, on each currentTime update:
+* In **Replay**, on each `currentTime` update:
 
-For any claim with start <= currentTime and not yet shown, create a PopupInstance.
+  * For any claim with `start <= currentTime` and not yet shown, create a PopupInstance.
+* In **Live**, whenever `/api/analyze-segment` returns new claims, create popups immediately.
+* Cleanup with a `setInterval` that filters out expired instances.
 
-In Live, whenever /api/analyze-segment returns new claims, create popups immediately.
+`PopupManager` splits into `sidePopups` and `bottomPopups` and renders:
 
-Cleanup with a setInterval that filters out expired instances.
+* **Bottom banner**: SAN‑style lower‑third:
 
-PopupManager splits into sidePopups and bottomPopups and renders:
+  * Title: `FACT CHECK • LIKELY FALSE` or `FALLACY • STRAWMAN`
+  * Body: `claim.reasoning` or claim text.
+  * Footer: speaker, timestamp, “See sources” clickable.
 
-Bottom banner: SAN‑style lower‑third:
+* **Side popup** (optional or for high severity): card near right edge, with more explanation.
 
-Title: FACT CHECK • LIKELY FALSE or FALLACY • STRAWMAN
+Use Framer Motion’s `AnimatePresence` for slide‑in/out.
 
-Body: claim.reasoning or claim text.
+### 8.5 TranscriptDrawer
 
-Footer: speaker, timestamp, “See sources” clickable.
+* Slides from left (`fixed left-0 top-0 h-full w-full md:w-[360px]`).
 
-Side popup (optional or for high severity): card near right edge, with more explanation.
+* Contains:
 
-Use Framer Motion’s AnimatePresence for slide‑in/out.
+  * Tab header (just “Transcript” for MVP).
+  * Scrollable list of segments:
 
-8.5 TranscriptDrawer
+    ```txt
+    [Speaker A] 00:35
+    I think we should raise taxes...
+    ```
 
-Slides from left (fixed left-0 top-0 h-full w-full md:w-[360px]).
+* In replay mode:
 
-Contains:
+  * Clicking a segment calls `onSeek(segment.start)` to jump the video.
 
-Tab header (just “Transcript” for MVP).
+### 8.6 FactFeedDrawer
 
-Scrollable list of segments:
+* Slides from right.
 
-[Speaker A] 00:35
-I think we should raise taxes...
+* Contains:
 
+  * Tab header (“Fact Feed”).
+  * For each `Claim`:
 
-In replay mode:
+    ```txt
+    [ STRAWMAN ] [ LIKELY FALSE ]  Speaker B · 00:37
+    “Cuomo wants to abolish all policing.”
+    Reasoning: <short explanation>
+    Sources:
+     • [Title] (link) – snippet…
+     • ...
+    ```
 
-Clicking a segment calls onSeek(segment.start) to jump the video.
+* This is your detailed “SAN panel.”
 
-8.6 FactFeedDrawer
+---
 
-Slides from right.
+## 9. Feature Breakdown: Core vs Optional
 
-Contains:
+### Core (must‑have for demo)
 
-Tab header (“Fact Feed”).
+* STT → segments (can be basic or precomputed).
+* Claude segment → claims & fallacies.
+* Fact‑check API integration per claim.
+* Live Mode:
 
-For each Claim:
+  * Webcam video.
+  * Basic STT pipeline (or simulated).
+  * Popups appearing as new claims arrive.
+* Replay Mode:
 
-[ STRAWMAN ] [ LIKELY FALSE ]  Speaker B · 00:37
-“Cuomo wants to abolish all policing.”
-Reasoning: <short explanation>
-Sources:
- • [Title] (link) – snippet…
- • ...
+  * Video player + `demo_clip.json`.
+  * Popups synced to `currentTime`.
+* UI:
 
+  * Full‑screen video layout.
+  * Top HUD.
+  * Bottom banner popups.
+  * Left transcript drawer.
+  * Right fact feed drawer.
 
-This is your detailed “SAN panel.”
+### Optional / Stretch
 
-9. Feature Breakdown: Core vs Optional
-Core (must‑have for demo)
+* Argument tracking tab:
 
-STT → segments (can be basic or precomputed).
+  * LLM summarization of unique arguments & whether they were answered.
+* Filters and metrics in FactFeed drawer:
 
-Claude segment → claims & fallacies.
+  * Filter by fallacy or verdict.
+  * Basic stats (e.g. count of fallacies per speaker).
+* Additional popup types:
 
-Fact‑check API integration per claim.
+  * Corner toasts for lighter tags (e.g. tone, appeal to emotion).
 
-Live Mode:
+---
 
-Webcam video.
+## 10. 6‑Hour Hackathon Roadmap (Team of 4)
 
-Basic STT pipeline (or simulated).
+**Hour 0–1: Setup & Shell**
 
-Popups appearing as new claims arrive.
+* Set up Next.js + Tailwind.
+* Build `DebateStage` layout with:
 
-Replay Mode:
+  * VideoLayer placeholder.
+  * HUD.
+  * Empty PopupManager (rendering fake popup).
+  * Empty drawers.
+* Set up FastAPI project + basic `/health` route.
+* Define TS + Pydantic models for `Segment`, `Claim`.
 
-Video player + demo_clip.json.
+---
 
-Popups synced to currentTime.
+**Hour 1–2: Replay UX (Fake Data)**
 
-UI:
+* Create a small hardcoded `demo_clip.json` with 2–3 segments and 2–3 claims.
+* Implement `/replay`:
 
-Full‑screen video layout.
+  * Video element playing a local clip.
+  * Track `currentTime`.
+  * PopupManager shows fake popups based on `currentTime`.
+  * TranscriptDrawer uses hardcoded segments.
+  * FactFeedDrawer uses hardcoded claims.
 
-Top HUD.
+Goal: **End of hour 2: you can demo the whole UI cycle with fake data.**
 
-Bottom banner popups.
+---
 
-Left transcript drawer.
+**Hour 2–3: Claude Integration (Segment → Claims)**
 
-Right fact feed drawer.
+* Implement `/api/analyze-segment` with:
 
-Optional / Stretch
+  * Claude call using the prompt above.
+  * Mapping response → `ClaimModel` with `verdict = "not_checked"` and `sources = []`.
+* Write a small script or temporary page that:
 
-Argument tracking tab:
+  * Reads a static transcript file.
+  * Splits into segments.
+  * Calls `/api/analyze-segment` for each segment.
+  * Produces a real `demo_clip.json`.
 
-LLM summarization of unique arguments & whether they were answered.
+Update `/replay` to load this real file.
 
-Filters and metrics in FactFeed drawer:
+---
 
-Filter by fallacy or verdict.
+**Hour 3–4: Fact‑Check API Integration**
 
-Basic stats (e.g. count of fallacies per speaker).
+* Implement `fact_check_claim_via_api(claim.text)`.
+* Wire it into `/api/analyze-segment`:
 
-Additional popup types:
+  * For each claim needing fact check, enrich with `verdict`, `confidence`, `sources`, `reasoning` if available.
+* Regenerate `demo_clip.json` with full data.
+* Update UI to:
 
-Corner toasts for lighter tags (e.g. tone, appeal to emotion).
+  * Color banners by verdict (green/red/yellow).
+  * Show sources list in FactFeed drawer.
 
-10. 6‑Hour Hackathon Roadmap (Team of 4)
+---
 
-Hour 0–1: Setup & Shell
+**Hour 4–5: Live Mode Skeleton**
 
-Set up Next.js + Tailwind.
+* Implement `/live`:
 
-Build DebateStage layout with:
+  * `getUserMedia` for webcam.
+  * Set up simple STT flow (or simulate with text input if STT integration is slow).
+* For each “live segment”:
 
-VideoLayer placeholder.
+  * Build `Segment`.
+  * Append to `segments` state.
+  * POST to `/api/analyze-segment` → append returned claims to `claims` state.
+* Popups show as soon as claims arrive; drawers show live feeds.
 
-HUD.
+---
 
-Empty PopupManager (rendering fake popup).
+**Hour 5–6: Polish & Backup Plan**
 
-Empty drawers.
+* Tune popup timing & severity rules.
+* Clean up styles:
 
-Set up FastAPI project + basic /health route.
+  * Better fonts, card spacing, colors.
+* Add little touches:
 
-Define TS + Pydantic models for Segment, Claim.
+  * Hover states, scroll shadows, smooth drawer animations.
+* Rehearse:
 
-Hour 1–2: Replay UX (Fake Data)
-
-Create a small hardcoded demo_clip.json with 2–3 segments and 2–3 claims.
-
-Implement /replay:
-
-Video element playing a local clip.
-
-Track currentTime.
-
-PopupManager shows fake popups based on currentTime.
-
-TranscriptDrawer uses hardcoded segments.
-
-FactFeedDrawer uses hardcoded claims.
-
-Goal: End of hour 2: you can demo the whole UI cycle with fake data.
-
-Hour 2–3: Claude Integration (Segment → Claims)
-
-Implement /api/analyze-segment with:
-
-Claude call using the prompt above.
-
-Mapping response → ClaimModel with verdict = "not_checked" and sources = [].
-
-Write a small script or temporary page that:
-
-Reads a static transcript file.
-
-Splits into segments.
-
-Calls /api/analyze-segment for each segment.
-
-Produces a real demo_clip.json.
-
-Update /replay to load this real file.
-
-Hour 3–4: Fact‑Check API Integration
-
-Implement fact_check_claim_via_api(claim.text).
-
-Wire it into /api/analyze-segment:
-
-For each claim needing fact check, enrich with verdict, confidence, sources, reasoning if available.
-
-Regenerate demo_clip.json with full data.
-
-Update UI to:
-
-Color banners by verdict (green/red/yellow).
-
-Show sources list in FactFeed drawer.
-
-Hour 4–5: Live Mode Skeleton
-
-Implement /live:
-
-getUserMedia for webcam.
-
-Set up simple STT flow (or simulate with text input if STT integration is slow).
-
-For each “live segment”:
-
-Build Segment.
-
-Append to segments state.
-
-POST to /api/analyze-segment → append returned claims to claims state.
-
-Popups show as soon as claims arrive; drawers show live feeds.
-
-Hour 5–6: Polish & Backup Plan
-
-Tune popup timing & severity rules.
-
-Clean up styles:
-
-Better fonts, card spacing, colors.
-
-Add little touches:
-
-Hover states, scroll shadows, smooth drawer animations.
-
-Rehearse:
-
-Live demo (even if STT is mocked).
-
-Replay demo as backup.
+  * Live demo (even if STT is mocked).
+  * Replay demo as backup.
