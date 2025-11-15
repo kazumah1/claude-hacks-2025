@@ -287,8 +287,13 @@ async def analyze_segment(segment: SegmentModel):
     session = SESSIONS[segment.sessionId]
 
     # Use Claude API to extract a single factual claim from the segment
+    # Rate limited to 1 claim every 15 seconds per session
     print(f"Extracting claim from segment: {segment.text[:100]}...")
-    claude_claim = await extract_claim_from_text(segment.text, segment.speaker)
+    claude_claim = await extract_claim_from_text(
+        segment.text,
+        segment.speaker,
+        segment.sessionId  # Pass session ID for rate limiting
+    )
 
     enriched_claims = []
 
