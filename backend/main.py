@@ -15,6 +15,7 @@ from models import (
     SESSIONS
 )
 from factiverse_client import fact_check_claim, detect_claims
+from claude_client import extract_claim_from_text
 
 app = fastapi.FastAPI()
 
@@ -282,50 +283,37 @@ async def analyze_segment(segment: SegmentModel):
     # Ensure session exists
     if segment.sessionId not in SESSIONS:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session = SESSIONS[segment.sessionId]
-    
-    # Try to extract claims directly from Factiverse. Fall back to the whole segment.
-    detected_claims = await detect_claims(segment.text)
-    if detected_claims:
-        claims_to_check = [
-            {
-                "text": claim["text"],
-                "fallacy": "none",
-                "detectionScore": claim.get("score")
-            }
-            for claim in detected_claims
-        ]
-    else:
-        claims_to_check = [
-            {
-                "text": segment.text,
-                "fallacy": "none"
-            }
-        ]
-    
+
+    # Use Claude API to extract a single factual claim from the segment
+    print(f"Extracting claim from segment: {segment.text[:100]}...")
+    claude_claim = await extract_claim_from_text(segment.text, segment.speaker)
+
     enriched_claims = []
-    
-    for claim_data in claims_to_check:
+
+    # If Claude extracted a claim, fact-check it with Factiverse
+    if claude_claim:
         claim_id = f"claim_{uuid.uuid4().hex[:8]}"
-        claim_text = claim_data["text"]
-        fallacy = claim_data["fallacy"]
-        
-        # Determine if this claim needs fact-checking
-        # In production, Claude will mark this
-        needs_fact_check = True  # For now, fact-check everything
-        
+        claim_text = claude_claim["text"]
+        fallacy = claude_claim.get("fallacy", "none")
+        needs_fact_check = claude_claim.get("needsFactCheck", True)
+
         verdict = "not_checked"
         confidence = None
         reasoning = None
         sources = None
-        
-        # Fact-check if needed
+
+        # Fact-check with Factiverse if needed
         if needs_fact_check:
+            print(f"Fact-checking claim: {claim_text}")
             fact_check_result = await fact_check_claim(claim_text)
             verdict = fact_check_result.verdict
             confidence = fact_check_result.confidence
-            reasoning = fact_check_result.reasoning
+            reasoning = _summarize_reasoning(
+                fact_check_result.reasoning,
+                len(fact_check_result.sources)
+            )
             sources = [
                 FactSourceModel(
                     title=source.title,
@@ -334,7 +322,7 @@ async def analyze_segment(segment: SegmentModel):
                 )
                 for source in fact_check_result.sources
             ]
-        
+
         claim = ClaimModel(
             id=claim_id,
             sessionId=segment.sessionId,
@@ -350,8 +338,10 @@ async def analyze_segment(segment: SegmentModel):
             reasoning=reasoning,
             sources=sources
         )
-        
+
         enriched_claims.append(claim)
+    else:
+        print(f"No factual claim found in segment: {segment.text}")
     
     # Update session state
     session.segments.append(segment)
