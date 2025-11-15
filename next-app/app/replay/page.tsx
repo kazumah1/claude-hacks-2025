@@ -175,7 +175,7 @@ export default function ReplayPage() {
     if (!analysisEnabled || !sessionReady) return;
     const interval = setInterval(() => {
       flushChunk();
-    }, 15000);
+    }, 12000);
     return () => clearInterval(interval);
   }, [analysisEnabled, sessionReady, flushChunk]);
 
@@ -355,7 +355,7 @@ export default function ReplayPage() {
       )}
 
       {showFactFeed && (
-        <div className="fixed right-0 top-0 h-full w-full md:w-[360px] bg-surface/95 backdrop-blur-sm z-20 p-6 border-l border-border shadow-lg">
+        <div className="fixed right-0 top-0 bottom-3 w-full md:w-[360px] max-h-[calc(100vh-0.75rem)] bg-surface/95 backdrop-blur-sm z-20 px-6 pt-6 pb-4 border-l border-border shadow-lg flex flex-col">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-foreground text-lg font-semibold">Fact Feed</h2>
             <button
@@ -380,7 +380,7 @@ export default function ReplayPage() {
               </button>
             ))}
           </div>
-          <div className="text-foreground/70 text-sm h-full flex flex-col">
+          <div className="text-foreground/70 text-sm flex-1 flex flex-col overflow-hidden">
             <div className="space-y-2">
               <p className="text-xs uppercase tracking-wide text-foreground/50">
                 {activeFeedTab === "claims"

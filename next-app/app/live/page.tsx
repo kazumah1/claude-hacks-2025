@@ -4,8 +4,15 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
 import { useDeepgramTranscription } from "../hooks/useDeepgramTranscription";
-import type { Claim, SpeakerMap, FallacyInsight } from "../types";
-import { analyzeSegment, startLiveSession, analyzeFallacies } from "../lib/factCheckApi";
+import type { Claim, SpeakerMap, FallacyInsight, Segment } from "../types";
+import { analyzeSegmentChunk, startLiveSession, analyzeFallacies } from "../lib/factCheckApi";
+
+interface NotificationToast {
+  id: string;
+  label: string;
+  message: string;
+  kind: "claim" | "fallacy";
+}
 
 const formatSpeakerLabel = (speakerId: string): string => {
   const match = speakerId.match(/spk_(\d+)/i);
@@ -17,6 +24,12 @@ const formatSpeakerLabel = (speakerId: string): string => {
   }
   return speakerId.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 };
+
+const formatFallacyLabel = (value: string): string =>
+  value
+    .split("_")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
 
 export default function LivePage() {
   const [elapsed, setElapsed] = useState(0);
@@ -39,6 +52,7 @@ export default function LivePage() {
   const [isAnalyzingClaims, setIsAnalyzingClaims] = useState(false);
   const [isAnalyzingFallacies, setIsAnalyzingFallacies] = useState(false);
   const [activeFeedTab, setActiveFeedTab] = useState<"claims" | "fallacies">("claims");
+  const [notifications, setNotifications] = useState<NotificationToast[]>([]);
 
   // Use Deepgram for real-time transcription
   const { segments, isConnected, error: transcriptionError } = useDeepgramTranscription({
@@ -47,8 +61,7 @@ export default function LivePage() {
     enabled: true
   });
   const processedSegmentsRef = useRef<Set<string>>(new Set());
-  const fallacyProcessedSegmentsRef = useRef<Set<string>>(new Set());
-  const lastFallacyCheckRef = useRef(0);
+  const chunkBufferRef = useRef<Segment[]>([]);
 
   const speakers = useMemo(() => {
     const derived: SpeakerMap = {};
@@ -84,8 +97,7 @@ export default function LivePage() {
 
   useEffect(() => {
     processedSegmentsRef.current = new Set();
-    fallacyProcessedSegmentsRef.current = new Set();
-    lastFallacyCheckRef.current = 0;
+    chunkBufferRef.current = [];
     setClaims([]);
     setFallacies([]);
   }, [sessionId]);
@@ -124,115 +136,118 @@ export default function LivePage() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionReady || !segments.length) return;
-
-    const newSegments = segments.filter((segment) => {
-      return !processedSegmentsRef.current.has(segment.id);
-    });
-
+    const newSegments = segments.filter((segment) => !processedSegmentsRef.current.has(segment.id));
     if (!newSegments.length) return;
+    newSegments.forEach((segment) => {
+      processedSegmentsRef.current.add(segment.id);
+      chunkBufferRef.current.push(segment);
+    });
+  }, [segments]);
 
-    let cancelled = false;
-
-    const run = async () => {
-      setIsAnalyzingClaims(true);
-      try {
-        for (const segment of newSegments) {
-          processedSegmentsRef.current.add(segment.id);
-          try {
-            const analyzed = await analyzeSegment(segment);
-            if (cancelled || !analyzed?.length) {
-              continue;
-            }
-
-            setClaims((prev) => {
-              const merged = [...prev, ...analyzed];
-              merged.sort((a, b) => {
-                const aStart = typeof a.start === "number" ? a.start : 0;
-                const bStart = typeof b.start === "number" ? b.start : 0;
-                return aStart - bStart;
-              });
-              return merged;
-            });
-            setFactFeedError(null);
-          } catch (error) {
-            console.error("Failed to analyze segment", segment.id, error);
-            if (!cancelled) {
-              const message =
-                error instanceof Error ? error.message : "Unable to analyze segment.";
-              setFactFeedError(message);
-            }
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          setIsAnalyzingClaims(false);
-        }
-      }
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [segments, sessionId, sessionReady]);
+  const enqueueNotification = useCallback((notification: NotificationToast) => {
+    setNotifications((prev) => [...prev, notification]);
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
+    }, 5000);
+  }, []);
 
   useEffect(() => {
-    if (!sessionReady || !segments.length) return;
-
-    const now = Date.now();
-    if (now - lastFallacyCheckRef.current < 15000) {
-      return;
+    if (showFactFeed) {
+      setNotifications([]);
     }
+  }, [showFactFeed]);
 
-    const newSegments = segments.filter(
-      (segment) => !fallacyProcessedSegmentsRef.current.has(segment.id)
-    );
+  const flushChunk = useCallback(async () => {
+    if (!sessionReady) return;
+    if (!chunkBufferRef.current.length) return;
 
-    if (!newSegments.length) {
-      return;
-    }
+    const payload = [...chunkBufferRef.current];
+    chunkBufferRef.current = [];
 
-    lastFallacyCheckRef.current = now;
-    let cancelled = false;
+    setIsAnalyzingClaims(true);
     setIsAnalyzingFallacies(true);
 
-    analyzeFallacies(newSegments, sessionId)
-      .then((insights) => {
-        if (cancelled) return;
-        newSegments.forEach((segment) => fallacyProcessedSegmentsRef.current.add(segment.id));
-        if (insights?.length) {
-          setFallacies((prev) => {
-            const combined = [...prev, ...insights];
-            combined.sort((a, b) => {
-              const aStart = typeof a.start === "number" ? a.start : 0;
-              const bStart = typeof b.start === "number" ? b.start : 0;
-              return aStart - bStart;
-            });
-            return combined;
+    try {
+      const analyzed = await analyzeSegmentChunk(sessionId, payload);
+      if (analyzed?.length) {
+        setClaims((prev) => {
+          const merged = [...prev, ...analyzed];
+          merged.sort((a, b) => {
+            const aStart = typeof a.start === "number" ? a.start : 0;
+            const bStart = typeof b.start === "number" ? b.start : 0;
+            return aStart - bStart;
           });
-        }
-        setFallacyError(null);
-      })
-      .catch((error) => {
-        console.error("Failed to analyze fallacies", error);
-        if (!cancelled) {
-          const message =
-            error instanceof Error ? error.message : "Unable to analyze fallacies.";
-          setFallacyError(message);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsAnalyzingFallacies(false);
-        }
-      });
+          return merged;
+        });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [segments, sessionId, sessionReady]);
+        if (!showFactFeed) {
+          const falseVerdicts = new Set(["likely_false", "disputed"]);
+          analyzed
+            .filter((claim) => falseVerdicts.has(claim.verdict))
+            .forEach((claim) => {
+              enqueueNotification({
+                id: `notif_claim_${claim.id}`,
+                kind: "claim",
+                label: "False Claim",
+                message: claim.text
+              });
+            });
+        }
+      }
+      setFactFeedError(null);
+    } catch (error) {
+      console.error("Failed to analyze chunk", error);
+      const message =
+        error instanceof Error ? error.message : "Unable to analyze transcript chunk.";
+      setFactFeedError(message);
+    } finally {
+      setIsAnalyzingClaims(false);
+    }
+
+    try {
+      const fallacyInsights = await analyzeFallacies(payload, sessionId);
+      if (fallacyInsights?.length) {
+        setFallacies((prev) => {
+          const merged = [...prev, ...fallacyInsights];
+          merged.sort((a, b) => {
+            const aStart = typeof a.start === "number" ? a.start : 0;
+            const bStart = typeof b.start === "number" ? b.start : 0;
+            return aStart - bStart;
+          });
+          return merged;
+        });
+
+        if (!showFactFeed) {
+          fallacyInsights
+            .filter((insight) => insight.fallacy && insight.fallacy !== "none")
+            .forEach((insight) => {
+              enqueueNotification({
+                id: `notif_fallacy_${insight.id}`,
+                kind: "fallacy",
+                label: `${formatFallacyLabel(insight.fallacy)} Fallacy`,
+                message: insight.text
+              });
+            });
+        }
+      }
+      setFallacyError(null);
+    } catch (error) {
+      console.error("Failed to analyze fallacies for chunk", error);
+      const message =
+        error instanceof Error ? error.message : "Unable to analyze fallacies.";
+      setFallacyError(message);
+    } finally {
+      setIsAnalyzingFallacies(false);
+    }
+  }, [sessionId, sessionReady, showFactFeed, enqueueNotification]);
+
+  useEffect(() => {
+    if (!sessionReady) return;
+    const interval = setInterval(() => {
+      flushChunk();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [sessionReady, flushChunk]);
 
   return (
     <div className="relative w-screen h-screen bg-foreground overflow-hidden">
@@ -296,7 +311,7 @@ export default function LivePage() {
       )}
 
       {showFactFeed && (
-        <div className="fixed right-0 top-0 h-full w-full md:w-[360px] bg-surface/95 backdrop-blur-sm z-20 p-6 border-l border-border shadow-lg">
+        <div className="fixed right-0 top-0 bottom-3 w-full md:w-[360px] max-h-[calc(100vh-0.75rem)] bg-surface/95 backdrop-blur-sm z-20 px-6 pt-6 pb-4 border-l border-border shadow-lg flex flex-col">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-foreground text-lg font-semibold">Fact Feed</h2>
             <button
@@ -321,7 +336,7 @@ export default function LivePage() {
               </button>
             ))}
           </div>
-          <div className="text-foreground/70 text-sm h-full flex flex-col">
+          <div className="text-foreground/70 text-sm flex-1 flex flex-col overflow-hidden">
             <div className="space-y-2">
               <p className="text-xs uppercase tracking-wide text-foreground/50">
                 {activeFeedTab === "claims" ? "Automatic claim analysis" : "Logical fallacy detection"}
@@ -440,6 +455,20 @@ export default function LivePage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {!showFactFeed && notifications.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-30 flex flex-col gap-2">
+          {notifications.map((notification) => (
+            <div
+              key={notification.id}
+              className="bg-background/95 border border-border rounded-xl px-4 py-3 shadow-lg w-64"
+            >
+              <p className="text-xs font-semibold text-primary mb-1">{notification.label}</p>
+              <p className="text-sm text-foreground line-clamp-3">{notification.message}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>

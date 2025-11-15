@@ -21,7 +21,7 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 # Rate limiting: Track last extraction time per session
 _last_extraction_time: Dict[str, float] = {}
-EXTRACTION_INTERVAL_SECONDS = 15.0  # Extract one claim every 15 seconds
+EXTRACTION_INTERVAL_SECONDS = 5.0  # Extract one claim every 15 seconds
 
 
 def _extract_json_payload(text: str) -> str:
