@@ -42,6 +42,18 @@ export interface Claim {
   sources?: FactSource[];
 }
 
+export interface FallacyInsight {
+  id: string;
+  sessionId: string;
+  segmentId: string;
+  speaker: string;
+  start: number;
+  end: number;
+  text: string;
+  fallacy: string;
+  reasoning?: string;
+}
+
 /**
  * Fact-check a single claim
  */
@@ -118,10 +130,65 @@ export async function analyzeSegment(segment: Segment): Promise<Claim[]> {
   return response.json();
 }
 
+export async function analyzeSegmentChunk(
+  sessionId: string,
+  segments: Segment[],
+  chunkId?: string
+): Promise<Claim[]> {
+  const response = await fetch(`${API_BASE_URL}/api/analyze-chunk`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sessionId,
+      chunkId,
+      segments,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Chunk analysis failed: ${errorText || response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Analyze a set of segments for logical fallacies
+ */
+export async function analyzeFallacies(
+  segments: Segment[],
+  sessionId?: string
+): Promise<FallacyInsight[]> {
+  const response = await fetch(`${API_BASE_URL}/api/fallacies/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sessionId,
+      segments
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Fallacy analysis failed: ${errorText || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.results;
+}
+
 /**
  * Start a new live debate session
  */
-export async function startLiveSession(speakers?: Record<string, string>): Promise<{
+export async function startLiveSession(
+  sessionId?: string,
+  speakers?: Record<string, string>
+): Promise<{
   sessionId: string;
   speakers: Record<string, string>;
 }> {
@@ -130,7 +197,10 @@ export async function startLiveSession(speakers?: Record<string, string>): Promi
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(speakers ? { speakers } : {}),
+    body: JSON.stringify({
+      ...(sessionId ? { sessionId } : {}),
+      ...(speakers ? { speakers } : {})
+    }),
   });
 
   if (!response.ok) {

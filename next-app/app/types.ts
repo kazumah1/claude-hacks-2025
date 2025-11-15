@@ -53,6 +53,18 @@ export interface Claim {
   sources?: FactSource[];    // supporting/contradicting sources
 }
 
+export interface FallacyInsight {
+  id: string;
+  sessionId: string;
+  segmentId: string;
+  speaker: SpeakerId;
+  start: number;
+  end: number;
+  text: string;
+  fallacy: FallacyType;
+  reasoning?: string;
+}
+
 export interface ClipAnalysis {
   clipId: string;
   title: string;

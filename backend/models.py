@@ -67,5 +67,31 @@ class BatchFactCheckRequest(BaseModel):
     claims: List[ClaudeClaimInput]
 
 
+class FallacyInsightModel(BaseModel):
+    """Represents a fallacy detected by Claude"""
+    id: str
+    sessionId: str
+    segmentId: str
+    speaker: str
+    start: float
+    end: float
+    text: str
+    fallacy: str
+    reasoning: Optional[str] = None
+
+
+class FallacyAnalysisRequest(BaseModel):
+    """Request payload for fallacy analysis"""
+    sessionId: Optional[str] = None
+    segments: List[SegmentModel]
+
+
+class SegmentChunkRequest(BaseModel):
+    """Request payload for chunk-based claim extraction"""
+    sessionId: str
+    chunkId: Optional[str] = None
+    segments: List[SegmentModel]
+
+
 # In-memory session storage
 SESSIONS: Dict[str, LiveSessionState] = {}

@@ -12,10 +12,13 @@ from models import (
     LiveSessionState,
     FactSourceModel,
     BatchFactCheckRequest,
+    FallacyInsightModel,
+    FallacyAnalysisRequest,
+    SegmentChunkRequest,
     SESSIONS
 )
 from factiverse_client import fact_check_claim, detect_claims
-from claude_client import extract_claim_from_text
+from claude_client import extract_claim_from_text, analyze_claim_with_context
 
 app = fastapi.FastAPI()
 
@@ -65,7 +68,8 @@ async def start_live_session(request: Optional[dict] = None):
         }
     }
     """
-    session_id = f"live_{int(time.time() * 1000)}"
+    requested_session_id = request.get("sessionId") if request else None
+    session_id = requested_session_id or f"live_{int(time.time() * 1000)}"
     
     default_speakers = {
         "spk_0": "Speaker A",
@@ -353,6 +357,187 @@ async def analyze_segment(segment: SegmentModel):
     session.claims.extend(enriched_claims)
     
     # Return claims as JSON
+    return [
+        {
+            "id": claim.id,
+            "sessionId": claim.sessionId,
+            "segmentId": claim.segmentId,
+            "speaker": claim.speaker,
+            "start": claim.start,
+            "end": claim.end,
+            "text": claim.text,
+            "fallacy": claim.fallacy,
+            "needsFactCheck": claim.needsFactCheck,
+            "verdict": claim.verdict,
+            "confidence": claim.confidence,
+            "reasoning": claim.reasoning,
+            "sources": [
+                {
+                    "title": source.title,
+                    "url": source.url,
+                    "snippet": source.snippet
+                }
+                for source in (claim.sources or [])
+            ]
+        }
+        for claim in enriched_claims
+    ]
+
+
+@app.post("/api/fallacies/analyze")
+async def analyze_fallacies(request: FallacyAnalysisRequest):
+    """
+    Analyze recent transcript segments for logical fallacies using Claude.
+    """
+    if not request.segments:
+        raise HTTPException(status_code=400, detail="segments list cannot be empty")
+
+    session_id = request.sessionId or f"adhoc_{int(time.time() * 1000)}"
+    results: List[FallacyInsightModel] = []
+
+    for segment in request.segments:
+        try:
+            analysis = await analyze_claim_with_context(
+                segment.text,
+                segment.speaker,
+                detect_fallacies=True
+            )
+        except Exception as exc:
+            print(f"Error analyzing fallacies for segment {segment.id}: {exc}")
+            continue
+
+        if not analysis:
+            continue
+
+        fallacy = (analysis.get("fallacy") or "none").lower()
+        if fallacy == "none":
+            continue
+
+        insight = FallacyInsightModel(
+            id=f"fallacy_{uuid.uuid4().hex[:8]}",
+            sessionId=session_id,
+            segmentId=segment.id,
+            speaker=segment.speaker,
+            start=segment.start,
+            end=segment.end,
+            text=analysis.get("text") or segment.text,
+            fallacy=fallacy,
+            reasoning=analysis.get("reasoning")
+        )
+        results.append(insight)
+
+    return {
+        "sessionId": session_id,
+        "results": [
+            {
+                "id": item.id,
+                "sessionId": item.sessionId,
+                "segmentId": item.segmentId,
+                "speaker": item.speaker,
+                "start": item.start,
+                "end": item.end,
+                "text": item.text,
+                "fallacy": item.fallacy,
+                "reasoning": item.reasoning,
+            }
+            for item in results
+        ]
+    }
+
+
+@app.post("/api/analyze-chunk")
+async def analyze_chunk(request: SegmentChunkRequest):
+    """Analyze multiple segments together for a single claim."""
+
+    if not request.segments:
+        raise HTTPException(status_code=400, detail="segments list cannot be empty")
+
+    if request.sessionId not in SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = SESSIONS[request.sessionId]
+    existing_ids = {segment.id for segment in session.segments}
+    sorted_segments = sorted(request.segments, key=lambda seg: seg.start)
+
+    # Ensure session knows about these segments
+    for seg in sorted_segments:
+        if seg.id not in existing_ids:
+            session.segments.append(seg)
+            existing_ids.add(seg.id)
+
+    lines = []
+    for seg in sorted_segments:
+        speaker_label = session.speakers.get(seg.speaker, seg.speaker)
+        lines.append(f"{speaker_label}: {seg.text}")
+    chunk_text = "\n".join(lines)
+
+    print(f"Extracting chunk claim for session {request.sessionId}: {chunk_text[:120]}...")
+    claude_claim = await extract_claim_from_text(
+        chunk_text,
+        speaker=None,
+        session_id=request.sessionId
+    )
+
+    enriched_claims: List[ClaimModel] = []
+
+    if claude_claim:
+        claim_id = f"claim_{uuid.uuid4().hex[:8]}"
+        claim_text = claude_claim["text"]
+        fallacy = claude_claim.get("fallacy", "none")
+        needs_fact_check = claude_claim.get("needsFactCheck", True)
+
+        # Attempt to determine which speaker made the claim
+        matched_segment = None
+        lowered = claim_text.lower()
+        for seg in sorted_segments:
+            if lowered and lowered in seg.text.lower():
+                matched_segment = seg
+                break
+        if not matched_segment:
+            matched_segment = sorted_segments[-1]
+
+        verdict = "not_checked"
+        confidence = None
+        reasoning = None
+        sources = None
+
+        if needs_fact_check:
+            print(f"Fact-checking chunk claim: {claim_text}")
+            fact_check_result = await fact_check_claim(claim_text)
+            verdict = fact_check_result.verdict
+            confidence = fact_check_result.confidence
+            reasoning = _summarize_reasoning(
+                fact_check_result.reasoning,
+                len(fact_check_result.sources)
+            )
+            sources = [
+                FactSourceModel(
+                    title=source.title,
+                    url=source.url,
+                    snippet=source.snippet
+                )
+                for source in fact_check_result.sources
+            ]
+
+        claim = ClaimModel(
+            id=claim_id,
+            sessionId=request.sessionId,
+            segmentId=matched_segment.id,
+            speaker=matched_segment.speaker,
+            start=matched_segment.start,
+            end=matched_segment.end,
+            text=claim_text,
+            fallacy=fallacy,
+            needsFactCheck=needs_fact_check,
+            verdict=verdict,
+            confidence=confidence,
+            reasoning=reasoning,
+            sources=sources
+        )
+
+        session.claims.append(claim)
+        enriched_claims.append(claim)
+
     return [
         {
             "id": claim.id,

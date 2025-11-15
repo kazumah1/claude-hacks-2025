@@ -14,6 +14,7 @@ import json
 
 # Claude API Configuration
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
 
 # Initialize the Anthropic client
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
@@ -21,6 +22,27 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 # Rate limiting: Track last extraction time per session
 _last_extraction_time: Dict[str, float] = {}
 EXTRACTION_INTERVAL_SECONDS = 15.0  # Extract one claim every 15 seconds
+
+
+def _extract_json_payload(text: str) -> str:
+    """
+    Claude sometimes wraps JSON in ```json fences; strip them for json.loads.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+
+    if stripped.startswith("```"):
+        parts = stripped.split("```")
+        for part in parts:
+            candidate = part.strip()
+            if not candidate:
+                continue
+            if candidate.lower().startswith("json"):
+                candidate = candidate[4:].strip()
+            if candidate.startswith("{") or candidate.startswith("["):
+                return candidate
+    return stripped
 
 
 async def extract_claim_from_text(
@@ -83,7 +105,7 @@ Text to analyze:
 "{text}"
 
 Instructions:
-1. Identify the MOST IMPORTANT factual claim in this text that can be fact-checked
+1. Concatenate this conversation into a single provable or disprovable claim.
 2. Extract it as a clear, standalone statement
 3. If the text contains no factual claims (e.g., it's just an opinion, question, or greeting), return "NO_CLAIM"
 4. Return ONLY the claim text, nothing else
@@ -106,7 +128,7 @@ Now extract the claim:"""
     try:
         # Call Claude API
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",  # Using latest Sonnet model
+            model=CLAUDE_MODEL,
             max_tokens=200,
             temperature=0.0,  # Deterministic for consistent extraction
             messages=[
@@ -247,7 +269,7 @@ Examples:
 
     try:
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model=CLAUDE_MODEL,
             max_tokens=300,
             temperature=0.0,
             messages=[
@@ -265,7 +287,8 @@ Examples:
 
         # Parse JSON response
         try:
-            result = json.loads(response_text)
+            payload = _extract_json_payload(response_text)
+            result = json.loads(payload)
 
             if not result.get("claim"):
                 return None
