@@ -3,6 +3,33 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { Segment } from "../types";
 
+const MERGE_GAP_SECONDS = 1.5;
+
+const mergeSegmentsIfNeeded = (currentSegments: Segment[], nextSegment: Segment): Segment[] => {
+  if (!currentSegments.length) {
+    return [nextSegment];
+  }
+
+  const lastSegment = currentSegments[currentSegments.length - 1];
+  const isSameSpeaker =
+    lastSegment.sessionId === nextSegment.sessionId && lastSegment.speaker === nextSegment.speaker;
+  const gap = nextSegment.start - lastSegment.end;
+
+  if (isSameSpeaker && gap <= MERGE_GAP_SECONDS) {
+    const mergedSegment: Segment = {
+      ...lastSegment,
+      end: Math.max(lastSegment.end, nextSegment.end),
+      text: `${lastSegment.text}${lastSegment.text.endsWith(" ") ? "" : " "}${nextSegment.text}`
+        .replace(/\s+/g, " ")
+        .trim()
+    };
+
+    return [...currentSegments.slice(0, -1), mergedSegment];
+  }
+
+  return [...currentSegments, nextSegment];
+};
+
 interface UseDeepgramTranscriptionProps {
   stream: MediaStream | null;
   sessionId: string;
@@ -96,10 +123,10 @@ export function useDeepgramTranscription({
           console.warn("No preferred mimeType supported, using browser default");
         }
 
-        const ws = new WebSocket("wss://api.deepgram.com/v1/listen", [
-          "token",
-          authKey
-        ]);
+        const wsUrl = new URL("wss://api.deepgram.com/v1/listen");
+        wsUrl.searchParams.set("diarize", "true");
+
+        const ws = new WebSocket(wsUrl.toString(), ["token", authKey]);
         socketRef.current = ws;
 
         const readyStateLabel = () => {
