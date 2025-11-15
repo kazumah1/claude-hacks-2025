@@ -1,29 +1,66 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import type { ChangeEvent } from "react";
 import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
-import type { Segment, Claim, SpeakerMap } from "../types";
+import { useDeepgramTranscription } from "../hooks/useDeepgramTranscription";
+import type { Claim, SpeakerMap } from "../types";
+
+const formatSpeakerLabel = (speakerId: string): string => {
+  const match = speakerId.match(/spk_(\d+)/i);
+  if (match) {
+    const idx = Number.parseInt(match[1], 10);
+    if (Number.isFinite(idx)) {
+      return `Speaker ${idx + 1}`;
+    }
+  }
+  return speakerId.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+};
 
 export default function ReplayPage() {
   const [elapsed, setElapsed] = useState(0);
   const [showTranscript, setShowTranscript] = useState(false);
   const [showFactFeed, setShowFactFeed] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [analysisEnabled, setAnalysisEnabled] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Session state (will be populated from replay data)
-  const [sessionId] = useState(`replay_${Date.now()}`);
-  const [segments] = useState<Segment[]>([]);
+  const [sessionId] = useState(() => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `replay_${crypto.randomUUID()}`;
+    }
+    return `replay_${Date.now()}`;
+  });
   const [claims] = useState<Claim[]>([]);
-  const [speakers] = useState<SpeakerMap>({
-    spk_0: "Speaker A",
-    spk_1: "Speaker B"
+
+  const { segments, isConnected, error: transcriptionError } = useDeepgramTranscription({
+    stream: mediaStream,
+    sessionId,
+    enabled: analysisEnabled && Boolean(mediaStream)
   });
 
+  const speakers = useMemo(() => {
+    const derived: SpeakerMap = {};
+    for (const seg of segments) {
+      if (!derived[seg.speaker]) {
+        derived[seg.speaker] = formatSpeakerLabel(seg.speaker);
+      }
+    }
+
+    if (Object.keys(derived).length === 0) {
+      derived.spk_0 = "Speaker A";
+      derived.spk_1 = "Speaker B";
+    }
+    return derived;
+  }, [segments]);
+
   // Handle video time updates
-  const handleTimeUpdate = (time: number) => {
+  const handleTimeUpdate = useCallback((time: number) => {
     setElapsed(Math.floor(time));
-  };
+  }, []);
 
   const handleToggleTranscript = () => {
     setShowTranscript(!showTranscript);
@@ -33,6 +70,39 @@ export default function ReplayPage() {
     setShowFactFeed(!showFactFeed);
   };
 
+  const handleFileSelect = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (videoUrl) {
+      URL.revokeObjectURL(videoUrl);
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setVideoUrl(objectUrl);
+    setAnalysisEnabled(false);
+    setMediaStream(null);
+  }, [videoUrl]);
+
+  const handleReplayStreamReady = useCallback((stream: MediaStream) => {
+    setMediaStream(stream);
+  }, []);
+
+  const handleStartAnalysis = useCallback(() => {
+    if (mediaStream) {
+      setAnalysisEnabled(true);
+    }
+  }, [mediaStream]);
+
+  useEffect(() => {
+    return () => {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+      }
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [mediaStream, videoUrl]);
+
   return (
     <div className="relative w-screen h-screen bg-foreground overflow-hidden">
       {/* Video layer - replay video */}
@@ -40,6 +110,7 @@ export default function ReplayPage() {
         mode="replay" 
         videoUrl={videoUrl || undefined}
         onTimeUpdate={handleTimeUpdate}
+        onStreamReady={handleReplayStreamReady}
       />
 
       {/* HUD overlay */}
@@ -49,6 +120,21 @@ export default function ReplayPage() {
         onToggleTranscript={handleToggleTranscript}
         onToggleFactFeed={handleToggleFactFeed}
       />
+
+      {/* Transcription status indicator */}
+      <div className="absolute top-20 left-4 z-10 pointer-events-none">
+        {analysisEnabled && isConnected && (
+          <div className="flex items-center gap-2 bg-blue-500/20 border border-blue-500/50 rounded-full px-3 py-1">
+            <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+            <span className="text-xs text-blue-100 font-medium">Transcribing recording</span>
+          </div>
+        )}
+        {transcriptionError && (
+          <div className="bg-red-500/20 border border-red-500/50 rounded-lg px-3 py-2 max-w-xs">
+            <span className="text-xs text-red-300">{transcriptionError}</span>
+          </div>
+        )}
+      </div>
 
       {/* Placeholder for video selection if no video loaded */}
       {!videoUrl && (
@@ -61,15 +147,38 @@ export default function ReplayPage() {
               Select a recorded debate to watch and analyze
             </p>
             <button
-              onClick={() => {
-                // TODO: Implement video file selection
-                alert("Video selection coming soon");
-              }}
+              onClick={() => fileInputRef.current?.click()}
               className="px-6 py-3 rounded-lg bg-primary text-foreground font-semibold hover:opacity-90 transition-all shadow-md"
             >
               Select Recording
             </button>
           </div>
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={handleFileSelect}
+      />
+
+      {videoUrl && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-col md:flex-row gap-3 bg-background/80 border border-border rounded-2xl px-4 py-3 backdrop-blur">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-4 py-2 rounded-full bg-background-secondary text-foreground text-sm font-medium hover:bg-background-secondary/80 transition-colors"
+          >
+            Choose Different File
+          </button>
+          <button
+            onClick={handleStartAnalysis}
+            disabled={!mediaStream}
+            className="px-4 py-2 rounded-full bg-primary text-foreground text-sm font-semibold disabled:opacity-40 hover:opacity-90 transition-all"
+          >
+            {analysisEnabled ? "Analyzing…" : "Start Transcribing"}
+          </button>
         </div>
       )}
 
@@ -85,13 +194,17 @@ export default function ReplayPage() {
               ✕
             </button>
           </div>
-          <div className="text-foreground/70 text-sm">
-            <p className="italic">Transcript will appear here...</p>
-            <div className="mt-4 space-y-4">
+          <div className="text-foreground/70 text-sm flex-1 overflow-y-auto pr-2">
+            <p className="italic">
+              {segments.length === 0
+                ? "Upload a recording and start the transcription to populate this list."
+                : "Latest transcript segments:"}
+            </p>
+            <div className="mt-4 space-y-4 pb-6">
               {segments.map(seg => (
                 <div key={seg.id} className="border-l-2 border-border pl-3">
                   <div className="text-xs text-foreground/50 mb-1">
-                    [{speakers[seg.speaker]}] {Math.floor(seg.start)}s
+                    [{speakers[seg.speaker] ?? formatSpeakerLabel(seg.speaker)}] {Math.floor(seg.start)}s
                   </div>
                   <div>{seg.text}</div>
                 </div>
@@ -127,7 +240,7 @@ export default function ReplayPage() {
                   </div>
                   <div className="text-sm">{claim.text}</div>
                   <div className="text-xs text-foreground/50 mt-2">
-                    {speakers[claim.speaker]} · {Math.floor(claim.start)}s
+                    {speakers[claim.speaker] ?? formatSpeakerLabel(claim.speaker)} · {Math.floor(claim.start)}s
                   </div>
                 </div>
               ))}
@@ -138,4 +251,3 @@ export default function ReplayPage() {
     </div>
   );
 }
-
