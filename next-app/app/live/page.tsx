@@ -1,26 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
 import { useDeepgramTranscription } from "../hooks/useDeepgramTranscription";
 import type { Claim, SpeakerMap } from "../types";
-import { factCheckClaudeClaims, type ClaudeClaimPayload } from "../lib/factCheckApi";
-
-const SAMPLE_CLAUDE_OUTPUT: ClaudeClaimPayload[] = [
-  {
-    text: "Mamdani wants to make NYC expensive and has no experience.",
-    speaker: "spk_0",
-    start: 12.3,
-    end: 15.8
-  },
-  {
-    text: "The congestion pricing plan will make it harder for small businesses to survive in NYC.",
-    speaker: "spk_1",
-    start: 31.0,
-    end: 35.2
-  }
-];
+import { analyzeSegment, startLiveSession } from "../lib/factCheckApi";
 
 const formatSpeakerLabel = (speakerId: string): string => {
   const match = speakerId.match(/spk_(\d+)/i);
@@ -47,9 +32,9 @@ export default function LivePage() {
   });
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
-  const [claimInput, setClaimInput] = useState(() => JSON.stringify(SAMPLE_CLAUDE_OUTPUT, null, 2));
+  const [sessionReady, setSessionReady] = useState(false);
   const [factFeedError, setFactFeedError] = useState<string | null>(null);
-  const [isFactChecking, setIsFactChecking] = useState(false);
+  const [isAnalyzingClaims, setIsAnalyzingClaims] = useState(false);
 
   // Use Deepgram for real-time transcription
   const { segments, isConnected, error: transcriptionError } = useDeepgramTranscription({
@@ -57,6 +42,7 @@ export default function LivePage() {
     sessionId,
     enabled: true
   });
+  const processedSegmentsRef = useRef<Set<string>>(new Set());
 
   const speakers = useMemo(() => {
     const derived: SpeakerMap = {};
@@ -90,94 +76,93 @@ export default function LivePage() {
     setShowFactFeed(!showFactFeed);
   };
 
-  const parseClaimsFromInput = (): ClaudeClaimPayload[] => {
-    const raw = claimInput.trim();
-    if (!raw) {
-      return [];
-    }
+  useEffect(() => {
+    processedSegmentsRef.current = new Set();
+    setClaims([]);
+  }, [sessionId]);
 
-    const normalize = (entry: unknown, index: number): ClaudeClaimPayload | null => {
-      if (typeof entry === "string") {
-        const text = entry.trim();
-        if (!text) return null;
-        return { id: `input_${index}`, text };
+  useEffect(() => {
+    let cancelled = false;
+    setSessionReady(false);
+
+    const run = async () => {
+      try {
+        await startLiveSession();
+        if (!cancelled) {
+          setSessionReady(true);
+          setFactFeedError(null);
+        }
+      } catch (error) {
+        console.error("Failed to start live session", error);
+        if (!cancelled) {
+          const message =
+            error instanceof Error ? error.message : "Unable to start live session.";
+          setFactFeedError(message);
+        }
       }
-      if (entry && typeof entry === "object") {
-        const text = typeof entry.text === "string" ? entry.text.trim() : "";
-        if (!text) return null;
-        const payload: ClaudeClaimPayload = {
-          id: typeof entry.id === "string" ? entry.id : undefined,
-          segmentId: typeof entry.segmentId === "string" ? entry.segmentId : undefined,
-          text,
-          speaker: typeof entry.speaker === "string" ? entry.speaker : undefined,
-          start: typeof entry.start === "number" ? entry.start : undefined,
-          end: typeof entry.end === "number" ? entry.end : undefined,
-          fallacy: typeof entry.fallacy === "string" ? entry.fallacy : undefined,
-          needsFactCheck:
-            typeof entry.needsFactCheck === "boolean" ? entry.needsFactCheck : undefined
-        };
-        return payload;
-      }
-      return null;
     };
 
-    try {
-      const parsed = JSON.parse(raw);
-      const arr = Array.isArray(parsed)
-        ? parsed
-        : Array.isArray(parsed?.claims)
-        ? parsed.claims
-        : [];
+    run();
 
-      return arr
-        .map((entry, index) => normalize(entry, index))
-        .filter(
-          (claim): claim is ClaudeClaimPayload => !!claim && typeof claim.text === "string"
-        )
-        .map((claim, idx) => ({
-          ...claim,
-          id: claim.id ?? `input_${idx}`
-        }));
-    } catch {
-      return raw
-        .split(/\n+/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .map((text, idx) => ({
-          id: `manual_${idx}`,
-          text
-        }));
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
-  const handleFactCheckClaims = async () => {
-    setFactFeedError(null);
-    const parsedClaims = parseClaimsFromInput();
-    if (!parsedClaims.length) {
-      setFactFeedError("Add at least one claim before fact-checking.");
-      return;
-    }
+  useEffect(() => {
+    if (!sessionReady || !segments.length) return;
 
-    setIsFactChecking(true);
-    try {
-      const results = await factCheckClaudeClaims(parsedClaims, sessionId);
-      setClaims(results);
-      if (!showFactFeed) {
-        setShowFactFeed(true);
+    const newSegments = segments.filter((segment) => {
+      return !processedSegmentsRef.current.has(segment.id);
+    });
+
+    if (!newSegments.length) return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      setIsAnalyzingClaims(true);
+      try {
+        for (const segment of newSegments) {
+          processedSegmentsRef.current.add(segment.id);
+          try {
+            const analyzed = await analyzeSegment(segment);
+            if (cancelled || !analyzed?.length) {
+              continue;
+            }
+
+            setClaims((prev) => {
+              const merged = [...prev, ...analyzed];
+              merged.sort((a, b) => {
+                const aStart = typeof a.start === "number" ? a.start : 0;
+                const bStart = typeof b.start === "number" ? b.start : 0;
+                return aStart - bStart;
+              });
+              return merged;
+            });
+            setFactFeedError(null);
+          } catch (error) {
+            console.error("Failed to analyze segment", segment.id, error);
+            if (!cancelled) {
+              const message =
+                error instanceof Error ? error.message : "Unable to analyze segment.";
+              setFactFeedError(message);
+            }
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAnalyzingClaims(false);
+        }
       }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to fact-check claims right now.";
-      setFactFeedError(message);
-    } finally {
-      setIsFactChecking(false);
-    }
-  };
+    };
 
-  const handleResetClaims = () => {
-    setClaims([]);
-    setFactFeedError(null);
-  };
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [segments, sessionId, sessionReady]);
 
   return (
     <div className="relative w-screen h-screen bg-foreground overflow-hidden">
@@ -252,42 +237,26 @@ export default function LivePage() {
             </button>
           </div>
           <div className="text-foreground/70 text-sm h-full flex flex-col">
-            <div className="space-y-3">
-              <label className="text-xs uppercase tracking-wide text-foreground/50">
-                Paste Claude claims (JSON array or one per line)
-              </label>
-              <textarea
-                value={claimInput}
-                onChange={(event) => setClaimInput(event.target.value)}
-                className="w-full h-40 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-foreground/50">
+                Automatic claim analysis
+              </p>
+              <p>
+                Claude extracts claims from each transcript segment in real time and Factiverse
+                verifies them. Results appear below as soon as they are ready.
+              </p>
               {factFeedError && (
-                <p className="text-xs text-red-400">{factFeedError}</p>
+                <p className="text-xs text-red-400">Error: {factFeedError}</p>
               )}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleFactCheckClaims}
-                  disabled={isFactChecking}
-                  className="px-4 py-2 rounded-md bg-primary text-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60"
-                >
-                  {isFactChecking ? "Fact-checking..." : "Fact-check Claims"}
-                </button>
-                <button
-                  onClick={handleResetClaims}
-                  className="px-4 py-2 rounded-md border border-border text-sm text-foreground hover:bg-background-secondary"
-                >
-                  Clear Results
-                </button>
-              </div>
+              {isAnalyzingClaims && (
+                <p className="text-xs text-foreground/50">Analyzing latest segment…</p>
+              )}
             </div>
 
             <div className="mt-4 flex-1 overflow-y-auto space-y-4 pr-1">
-              {isFactChecking && (
-                <p className="text-xs text-foreground/50">Contacting Factiverse...</p>
-              )}
-              {!isFactChecking && !claims.length && (
+              {!claims.length && !isAnalyzingClaims && !factFeedError && (
                 <p className="text-sm italic text-foreground/50">
-                  Run the fact-check to populate the feed.
+                  Waiting for the first claim to be spoken…
                 </p>
               )}
               {claims.map(claim => (
