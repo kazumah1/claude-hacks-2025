@@ -131,6 +131,11 @@ The `extract_claim_from_text()` function uses Claude 3.5 Sonnet to:
 2. **Extract** it as a clean, standalone statement
 3. **Filter** non-claims (opinions, questions, greetings)
 
+**Rate Limiting:** Extracts **one claim every 15 seconds per session** to:
+- Avoid overwhelming the Factiverse API
+- Reduce costs from frequent Claude API calls
+- Ensure quality over quantity in fact-checking
+
 **Example:**
 
 Input:
@@ -211,6 +216,31 @@ Factiverse: Fact-check result
 ```
 
 ## Advanced Features
+
+### Rate Limiting Control
+
+The claim extraction is rate-limited to 1 claim every 15 seconds per session. You can reset this if needed:
+
+```python
+from claude_client import reset_rate_limiter
+
+# Reset for a specific session
+reset_rate_limiter("live_abc123")
+
+# Reset for all sessions
+reset_rate_limiter()
+```
+
+**How it works:**
+- Each session tracks the timestamp of its last claim extraction
+- New segments within 15 seconds are skipped (no Claude API call)
+- After 15 seconds, the next segment with a claim will be extracted
+- This prevents API spam during rapid speech
+
+**Console output:**
+```
+Rate limit: Skipping extraction (wait 8.3s more)
+```
 
 ### Batch Processing
 

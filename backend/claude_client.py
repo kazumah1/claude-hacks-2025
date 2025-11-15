@@ -6,6 +6,7 @@ for extracting factual claims from debate transcript segments.
 """
 
 import os
+import time
 from typing import List, Dict, Any, Optional
 from anthropic import Anthropic
 import json
@@ -17,10 +18,21 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 # Initialize the Anthropic client
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
+# Rate limiting: Track last extraction time per session
+_last_extraction_time: Dict[str, float] = {}
+EXTRACTION_INTERVAL_SECONDS = 15.0  # Extract one claim every 15 seconds
 
-async def extract_claim_from_text(text: str, speaker: Optional[str] = None) -> Optional[Dict[str, Any]]:
+
+async def extract_claim_from_text(
+    text: str,
+    speaker: Optional[str] = None,
+    session_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Extract a single verifiable factual claim from transcript text using Claude API.
+
+    Rate limiting: Extracts one claim every 15 seconds per session to avoid overwhelming
+    the fact-checking API and reduce costs.
 
     This function uses Claude to:
     1. Identify the most important factual claim in the text
@@ -30,9 +42,12 @@ async def extract_claim_from_text(text: str, speaker: Optional[str] = None) -> O
     Args:
         text: The transcript segment text to analyze
         speaker: Optional speaker identifier (e.g., "spk_0", "Speaker A")
+        session_id: Optional session identifier for rate limiting
 
     Returns:
-        Dictionary with extracted claim information, or None if no claim found:
+        Dictionary with extracted claim information, or None if:
+        - No claim found
+        - Rate limit not met (too soon since last extraction)
         {
             "text": "The extracted claim text",
             "needsFactCheck": true,
@@ -43,6 +58,21 @@ async def extract_claim_from_text(text: str, speaker: Optional[str] = None) -> O
         raise ValueError(
             "ANTHROPIC_API_KEY not set. Please set the environment variable."
         )
+
+    # Rate limiting: Check if enough time has passed since last extraction
+    if session_id:
+        current_time = time.time()
+        last_time = _last_extraction_time.get(session_id, 0)
+        time_since_last = current_time - last_time
+
+        if time_since_last < EXTRACTION_INTERVAL_SECONDS:
+            # Too soon - skip this extraction
+            time_remaining = EXTRACTION_INTERVAL_SECONDS - time_since_last
+            print(f"Rate limit: Skipping extraction (wait {time_remaining:.1f}s more)")
+            return None
+
+        # Update last extraction time for this session
+        _last_extraction_time[session_id] = current_time
 
     # Construct the prompt for Claude
     speaker_context = f" by {speaker}" if speaker else ""
@@ -110,6 +140,21 @@ Now extract the claim:"""
         traceback.print_exc()
         # Return None on error rather than failing the whole pipeline
         return None
+
+
+def reset_rate_limiter(session_id: Optional[str] = None):
+    """
+    Reset the rate limiter for a specific session or all sessions.
+
+    Args:
+        session_id: Optional session ID to reset. If None, resets all sessions.
+    """
+    if session_id:
+        _last_extraction_time.pop(session_id, None)
+        print(f"Rate limiter reset for session: {session_id}")
+    else:
+        _last_extraction_time.clear()
+        print("Rate limiter reset for all sessions")
 
 
 async def extract_claims_batch(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
