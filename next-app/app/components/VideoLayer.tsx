@@ -6,9 +6,10 @@ interface VideoLayerProps {
   mode: "live" | "replay";
   videoUrl?: string; // for replay mode
   onTimeUpdate?: (time: number) => void; // for replay mode
+  onStreamReady?: (stream: MediaStream) => void; // for live mode - callback when stream is ready
 }
 
-export default function VideoLayer({ mode, videoUrl, onTimeUpdate }: VideoLayerProps) {
+export default function VideoLayer({ mode, videoUrl, onTimeUpdate, onStreamReady }: VideoLayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,11 @@ export default function VideoLayer({ mode, videoUrl, onTimeUpdate }: VideoLayerP
 
           if (videoRef.current) {
             videoRef.current.srcObject = mediaStream;
+          }
+
+          // Notify parent component that stream is ready
+          if (onStreamReady) {
+            onStreamReady(mediaStream);
           }
         } catch (err) {
           console.error("Error accessing media devices:", err);
@@ -84,6 +90,7 @@ export default function VideoLayer({ mode, videoUrl, onTimeUpdate }: VideoLayerP
       controls={mode === "replay"}
       onTimeUpdate={handleTimeUpdate}
       className="absolute inset-0 w-full h-full object-cover"
+      style={mode === "live" ? { transform: "scaleX(-1)" } : undefined}
       src={mode === "replay" ? videoUrl : undefined}
     />
   );
