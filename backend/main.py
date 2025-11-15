@@ -4,12 +4,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import uuid
 import time
+import asyncio
 
 from models import (
     SegmentModel,
     ClaimModel,
     LiveSessionState,
     FactSourceModel,
+    BatchFactCheckRequest,
     SESSIONS
 )
 from factiverse_client import fact_check_claim, detect_claims
@@ -24,6 +26,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _summarize_reasoning(text: Optional[str], fallback_count: int = 0) -> Optional[str]:
+    """Return a short summary suitable for UI display."""
+    if text:
+        summary = text.strip()
+        if not summary:
+            summary = None
+    else:
+        summary = None
+    if summary:
+        max_len = 240
+        if len(summary) > max_len:
+            summary = summary[: max_len - 1].rstrip() + "…"
+        return summary
+    if fallback_count:
+        return f"Factiverse returned {fallback_count} source(s) for this claim."
+    return None
 
 
 @app.get("/health")
@@ -113,6 +133,108 @@ async def fact_check_endpoint(request: dict):
                 "snippet": source.snippet
             }
             for source in result.sources
+        ]
+    }
+
+
+@app.post("/api/claims/fact-check")
+async def fact_check_claude_claims(request: BatchFactCheckRequest):
+    """
+    Accept a list of claims (e.g., from Claude) and return verdicts + summaries + sources.
+    """
+    if not request.claims:
+        raise HTTPException(status_code=400, detail="claims list cannot be empty")
+
+    session_id = request.sessionId or f"adhoc_{int(time.time() * 1000)}"
+
+    async def _evaluate_claim(idx: int, claim_input):
+        claim_id = claim_input.id or f"claim_{uuid.uuid4().hex[:8]}"
+        segment_id = claim_input.segmentId or claim_id
+        fallacy = (claim_input.fallacy or "none").lower()
+        needs_fact_check = (
+            True if claim_input.needsFactCheck is None else bool(claim_input.needsFactCheck)
+        )
+        text = claim_input.text.strip()
+        if not text:
+            needs_fact_check = False
+
+        start = float(claim_input.start) if claim_input.start is not None else 0.0
+        end = float(claim_input.end) if claim_input.end is not None else start
+
+        verdict = "not_checked"
+        confidence = None
+        summary = None
+        sources: Optional[List[FactSourceModel]] = None
+
+        if needs_fact_check:
+            fact_check_result = await fact_check_claim(text)
+            verdict = fact_check_result.verdict
+            confidence = fact_check_result.confidence
+            sources = [
+                FactSourceModel(
+                    title=source.title,
+                    url=source.url,
+                    snippet=source.snippet
+                )
+                for source in fact_check_result.sources
+            ]
+            summary = _summarize_reasoning(fact_check_result.reasoning, len(sources))
+        else:
+            summary = "Claim skipped (no fact-check needed)"
+
+        claim_model = ClaimModel(
+            id=claim_id,
+            sessionId=session_id,
+            segmentId=segment_id,
+            speaker=claim_input.speaker or "unknown",
+            start=start,
+            end=end,
+            text=text,
+            fallacy=fallacy or "none",
+            needsFactCheck=needs_fact_check,
+            verdict=verdict,
+            confidence=confidence,
+            reasoning=summary,
+            sources=sources
+        )
+        return claim_model
+
+    tasks = [
+        _evaluate_claim(idx, claim)
+        for idx, claim in enumerate(request.claims)
+    ]
+    results = await asyncio.gather(*tasks)
+
+    if request.sessionId and request.sessionId in SESSIONS:
+        session = SESSIONS[request.sessionId]
+        session.claims.extend(results)
+
+    return {
+        "sessionId": session_id,
+        "results": [
+            {
+                "id": claim.id,
+                "sessionId": claim.sessionId,
+                "segmentId": claim.segmentId,
+                "speaker": claim.speaker,
+                "start": claim.start,
+                "end": claim.end,
+                "text": claim.text,
+                "fallacy": claim.fallacy,
+                "needsFactCheck": claim.needsFactCheck,
+                "verdict": claim.verdict,
+                "confidence": claim.confidence,
+                "reasoning": claim.reasoning,
+                "sources": [
+                    {
+                        "title": source.title,
+                        "url": source.url,
+                        "snippet": source.snippet
+                    }
+                    for source in (claim.sources or [])
+                ]
+            }
+            for claim in results
         ]
     }
 

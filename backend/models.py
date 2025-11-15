@@ -49,6 +49,23 @@ class LiveSessionState(BaseModel):
     claims: List[ClaimModel] = []
 
 
+class ClaudeClaimInput(BaseModel):
+    """Claim payload coming from Claude or another extractor"""
+    id: Optional[str] = None
+    segmentId: Optional[str] = None
+    text: str
+    speaker: Optional[str] = None
+    start: Optional[float] = None
+    end: Optional[float] = None
+    fallacy: Optional[str] = "none"
+    needsFactCheck: Optional[bool] = True
+
+
+class BatchFactCheckRequest(BaseModel):
+    """Request payload for batch fact-checking claims"""
+    sessionId: Optional[str] = None
+    claims: List[ClaudeClaimInput]
+
+
 # In-memory session storage
 SESSIONS: Dict[str, LiveSessionState] = {}
-

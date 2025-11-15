@@ -61,6 +61,44 @@ export async function factCheckClaim(claimText: string): Promise<FactCheckResult
   return response.json();
 }
 
+export interface ClaudeClaimPayload {
+  id?: string;
+  segmentId?: string;
+  speaker?: string;
+  start?: number;
+  end?: number;
+  text: string;
+  fallacy?: string;
+  needsFactCheck?: boolean;
+}
+
+/**
+ * Fact-check a batch of Claude-extracted claims
+ */
+export async function factCheckClaudeClaims(
+  claims: ClaudeClaimPayload[],
+  sessionId?: string
+): Promise<Claim[]> {
+  const response = await fetch(`${API_BASE_URL}/api/claims/fact-check`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sessionId,
+      claims
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Batch fact-check failed: ${errorText || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.results;
+}
+
 /**
  * Analyze a transcript segment to extract and fact-check claims
  */
@@ -122,4 +160,3 @@ export async function getLiveSessionState(sessionId: string): Promise<{
 
   return response.json();
 }
-

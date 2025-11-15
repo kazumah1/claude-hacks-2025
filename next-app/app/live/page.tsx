@@ -5,6 +5,22 @@ import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
 import { useDeepgramTranscription } from "../hooks/useDeepgramTranscription";
 import type { Claim, SpeakerMap } from "../types";
+import { factCheckClaudeClaims, type ClaudeClaimPayload } from "../lib/factCheckApi";
+
+const SAMPLE_CLAUDE_OUTPUT: ClaudeClaimPayload[] = [
+  {
+    text: "Mamdani wants to make NYC expensive and has no experience.",
+    speaker: "spk_0",
+    start: 12.3,
+    end: 15.8
+  },
+  {
+    text: "The congestion pricing plan will make it harder for small businesses to survive in NYC.",
+    speaker: "spk_1",
+    start: 31.0,
+    end: 35.2
+  }
+];
 
 const formatSpeakerLabel = (speakerId: string): string => {
   const match = speakerId.match(/spk_(\d+)/i);
@@ -30,7 +46,10 @@ export default function LivePage() {
     return `live_${Date.now()}`;
   });
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
-  const [claims] = useState<Claim[]>([]);
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [claimInput, setClaimInput] = useState(() => JSON.stringify(SAMPLE_CLAUDE_OUTPUT, null, 2));
+  const [factFeedError, setFactFeedError] = useState<string | null>(null);
+  const [isFactChecking, setIsFactChecking] = useState(false);
 
   // Use Deepgram for real-time transcription
   const { segments, isConnected, error: transcriptionError } = useDeepgramTranscription({
@@ -69,6 +88,95 @@ export default function LivePage() {
 
   const handleToggleFactFeed = () => {
     setShowFactFeed(!showFactFeed);
+  };
+
+  const parseClaimsFromInput = (): ClaudeClaimPayload[] => {
+    const raw = claimInput.trim();
+    if (!raw) {
+      return [];
+    }
+
+    const normalize = (entry: any, index: number): ClaudeClaimPayload | null => {
+      if (typeof entry === "string") {
+        const text = entry.trim();
+        if (!text) return null;
+        return { id: `input_${index}`, text };
+      }
+      if (entry && typeof entry === "object") {
+        const text = typeof entry.text === "string" ? entry.text.trim() : "";
+        if (!text) return null;
+        const payload: ClaudeClaimPayload = {
+          id: typeof entry.id === "string" ? entry.id : undefined,
+          segmentId: typeof entry.segmentId === "string" ? entry.segmentId : undefined,
+          text,
+          speaker: typeof entry.speaker === "string" ? entry.speaker : undefined,
+          start: typeof entry.start === "number" ? entry.start : undefined,
+          end: typeof entry.end === "number" ? entry.end : undefined,
+          fallacy: typeof entry.fallacy === "string" ? entry.fallacy : undefined,
+          needsFactCheck:
+            typeof entry.needsFactCheck === "boolean" ? entry.needsFactCheck : undefined
+        };
+        return payload;
+      }
+      return null;
+    };
+
+    try {
+      const parsed = JSON.parse(raw);
+      const arr = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.claims)
+        ? parsed.claims
+        : [];
+
+      return arr
+        .map((entry, index) => normalize(entry, index))
+        .filter(
+          (claim): claim is ClaudeClaimPayload => !!claim && typeof claim.text === "string"
+        )
+        .map((claim, idx) => ({
+          ...claim,
+          id: claim.id ?? `input_${idx}`
+        }));
+    } catch {
+      return raw
+        .split(/\n+/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map((text, idx) => ({
+          id: `manual_${idx}`,
+          text
+        }));
+    }
+  };
+
+  const handleFactCheckClaims = async () => {
+    setFactFeedError(null);
+    const parsedClaims = parseClaimsFromInput();
+    if (!parsedClaims.length) {
+      setFactFeedError("Add at least one claim before fact-checking.");
+      return;
+    }
+
+    setIsFactChecking(true);
+    try {
+      const results = await factCheckClaudeClaims(parsedClaims, sessionId);
+      setClaims(results);
+      if (!showFactFeed) {
+        setShowFactFeed(true);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to fact-check claims right now.";
+      setFactFeedError(message);
+    } finally {
+      setIsFactChecking(false);
+    }
+  };
+
+  const handleResetClaims = () => {
+    setClaims([]);
+    setFactFeedError(null);
   };
 
   return (
@@ -143,23 +251,94 @@ export default function LivePage() {
               ✕
             </button>
           </div>
-          <div className="text-foreground/70 text-sm">
-            <p className="italic">Claims and fact-checks will appear here...</p>
-            <div className="mt-4 space-y-4">
+          <div className="text-foreground/70 text-sm h-full flex flex-col">
+            <div className="space-y-3">
+              <label className="text-xs uppercase tracking-wide text-foreground/50">
+                Paste Claude claims (JSON array or one per line)
+              </label>
+              <textarea
+                value={claimInput}
+                onChange={(event) => setClaimInput(event.target.value)}
+                className="w-full h-40 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+              {factFeedError && (
+                <p className="text-xs text-red-400">{factFeedError}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleFactCheckClaims}
+                  disabled={isFactChecking}
+                  className="px-4 py-2 rounded-md bg-primary text-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                >
+                  {isFactChecking ? "Fact-checking..." : "Fact-check Claims"}
+                </button>
+                <button
+                  onClick={handleResetClaims}
+                  className="px-4 py-2 rounded-md border border-border text-sm text-foreground hover:bg-background-secondary"
+                >
+                  Clear Results
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex-1 overflow-y-auto space-y-4 pr-1">
+              {isFactChecking && (
+                <p className="text-xs text-foreground/50">Contacting Factiverse...</p>
+              )}
+              {!isFactChecking && !claims.length && (
+                <p className="text-sm italic text-foreground/50">
+                  Run the fact-check to populate the feed.
+                </p>
+              )}
               {claims.map(claim => (
-                <div key={claim.id} className="border border-border rounded-lg p-3 bg-background-secondary">
-                  <div className="flex gap-2 mb-2">
+                <div
+                  key={claim.id}
+                  className="border border-border rounded-lg p-3 bg-background-secondary shadow-sm"
+                >
+                  <div className="flex flex-wrap gap-2 mb-2">
                     <span className="text-xs px-2 py-1 bg-primary/20 text-foreground rounded">
                       {claim.fallacy.toUpperCase()}
                     </span>
                     <span className="text-xs px-2 py-1 bg-primary/10 text-foreground rounded">
                       {claim.verdict.toUpperCase()}
                     </span>
+                    {typeof claim.confidence === "number" && (
+                      <span className="text-xs px-2 py-1 bg-primary/5 text-foreground rounded">
+                        Confidence {(claim.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
                   </div>
                   <div className="text-sm">{claim.text}</div>
+                  {claim.reasoning && (
+                    <div className="text-xs text-foreground/70 mt-2">
+                      {claim.reasoning}
+                    </div>
+                  )}
                   <div className="text-xs text-foreground/50 mt-2">
-                    {speakers[claim.speaker] ?? formatSpeakerLabel(claim.speaker)} · {Math.floor(claim.start)}s
+                    {claim.speaker
+                      ? speakers[claim.speaker] ?? formatSpeakerLabel(claim.speaker)
+                      : "Unknown speaker"}{" "}
+                    · {Math.floor(claim.start ?? 0)}s
                   </div>
+                  {claim.sources?.length ? (
+                    <div className="mt-3">
+                      <p className="text-[11px] uppercase text-foreground/50 mb-1">Sources</p>
+                      <ul className="space-y-1">
+                        {claim.sources.slice(0, 3).map((source) => (
+                          <li key={`${claim.id}-${source.url}`} className="text-xs">
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary underline-offset-2 hover:underline"
+                            >
+                              {source.title || source.url}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
