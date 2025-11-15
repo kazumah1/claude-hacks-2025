@@ -6,15 +6,17 @@ export default function Home() {
     <div className="flex min-h-screen items-center justify-center bg-background font-sans relative">
       {/* Logo in top left */}
       <div className="absolute top-3 left-3">
-        <Image
-          src="/logo.png"
-          alt="BeeHonest Logo"
-          width={100}
-          height={100}
-          className="w-25 h-25"
-          priority
-          quality={100}
-        />
+        <Link href="/about" aria-label="About BeeHonest">
+          <Image
+            src="/logo.png"
+            alt="BeeHonest Logo"
+            width={100}
+            height={100}
+            className="w-25 h-25 transition-opacity hover:opacity-80"
+            priority
+            quality={100}
+          />
+        </Link>
       </div>
       
       <main className="flex flex-col items-center justify-center gap-8 px-8">
