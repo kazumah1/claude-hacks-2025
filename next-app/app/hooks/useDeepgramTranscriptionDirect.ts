@@ -1,6 +1,7 @@
 "use client";
 
-// This file previously opened a WebSocket directly to Deepgram from the browser.
-// That approach leaked the API key and failed because Deepgram forbids long-lived
-// browser tokens. We now obtain short-lived tokens from Next.js API routes instead.
+// Historical note: this file originally exported a Deepgram-specific hook that
+// opened a WebSocket directly from the browser. We now route audio chunks
+// through Next.js API routes and proxy them to ElevenLabs for diarized
+// transcription, but keep this re-export so existing imports continue to work.
 export { useDeepgramTranscription } from "./useDeepgramTranscription";

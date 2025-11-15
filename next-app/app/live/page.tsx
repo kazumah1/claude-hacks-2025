@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import VideoLayer from "../components/VideoLayer";
 import HUD from "../components/HUD";
 import { useDeepgramTranscription } from "../hooks/useDeepgramTranscription";
@@ -78,9 +78,9 @@ export default function LivePage() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleStreamReady = (stream: MediaStream) => {
+  const handleStreamReady = useCallback((stream: MediaStream) => {
     setMediaStream(stream);
-  };
+  }, []);
 
   const handleToggleTranscript = () => {
     setShowTranscript(!showTranscript);
@@ -96,7 +96,7 @@ export default function LivePage() {
       return [];
     }
 
-    const normalize = (entry: any, index: number): ClaudeClaimPayload | null => {
+    const normalize = (entry: unknown, index: number): ClaudeClaimPayload | null => {
       if (typeof entry === "string") {
         const text = entry.trim();
         if (!text) return null;

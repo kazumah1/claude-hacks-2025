@@ -184,8 +184,8 @@ export default function ReplayPage() {
 
       {/* Temporary indicators for drawer states (for testing) */}
       {showTranscript && (
-        <div className="fixed left-0 top-0 h-full w-full md:w-[360px] bg-surface/95 backdrop-blur-sm z-20 p-6 border-r border-border shadow-lg">
-          <div className="flex justify-between items-center mb-4">
+        <div className="fixed left-0 top-0 h-full w-full md:w-[360px] bg-surface/95 backdrop-blur-sm z-20 p-6 border-r border-border shadow-lg flex flex-col">
+          <div className="flex justify-between items-center mb-4 shrink-0">
             <h2 className="text-foreground text-lg font-semibold">Transcript</h2>
             <button
               onClick={() => setShowTranscript(false)}

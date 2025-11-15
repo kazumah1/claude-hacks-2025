@@ -19,7 +19,7 @@ function formatTime(seconds: number): string {
 export default function HUD({
   mode,
   elapsed,
-  title = "Universal Healthcare Debate",
+  title = "BeeHonest",
   onToggleTranscript,
   onToggleFactFeed
 }: HUDProps) {
